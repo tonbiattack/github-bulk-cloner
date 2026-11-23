@@ -3,6 +3,9 @@ native-host/host
 native-host/host.exe
 *.exe
 
+# Store packages (regenerate with tools/package-extension.ps1)
+dist/
+
 # Go
 *.test
 *.out

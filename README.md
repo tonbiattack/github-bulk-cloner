@@ -1,94 +1,199 @@
-# github-bulk-cloner
+<div align="center">
 
-GitHub のリポジトリ一覧ページ上でチェックを付けると、Windows PC の指定フォルダにその場で `git clone` する Chrome 拡張 + Go Native Messaging ホスト。
+<img src="extension/icons/icon-128.png" width="96" height="96" alt="GitHub Bulk Cloner">
 
-## 目的
-GitHub の Web ページからリポジトリ URL を一件ずつコピーして手動で clone する手間をなくす。欲しいリポジトリのチェックを付けるだけで、その場で clone される。
+# GitHub Bulk Cloner
 
-## MVP ユーザーフロー
-1. Windows に Go ネイティブホストをインストール・登録（初回のみ）。Git と、Private リポジトリには認証済み `gh` CLI を利用する。
-2. Chrome 拡張を導入し、GitHub のプロフィールの Repositories タブ、検索結果などの対応ページを開く。
-3. Content script がリポジトリへのリンクだけを検出し、各候補にチェックボックスを表示する。別途ポップアップに検出一覧と選択状態を出す。
-4. クローン先のルートディレクトリを指定（既定値 `C:\apps`、変更値を保存）。
-5. 「Clone selected」を押すと、拡張が Native Messaging を通じて Go ホストに `owner/repo` の一覧を送る。
-6. Go ホストが順番にクローンし、成功・失敗・既存の各結果を返す。拡張で進捗と終了結果を表示する。
-7. 一覧ページでチェックを付けると、そのリポジトリがその場で clone される。保存先フォルダが無ければ自動作成する。
+**チェックを付けるだけで、その場でローカルに clone。**
 
-## 機能要件
-- リポジトリ URL は `https://github.com/<owner>/<repo>` の形式だけを採用。リンク末尾の `.git`、クエリや末尾スラッシュを正規化し、重複排除する。
-- `github.com/topics/*`、GitHub の機能ページ、リポジトリ内の `issues` や `tree` へのリンクをリポジトリ候補として誤検知しない。GitHub の対応画面では既知の DOM コンテナ内のリポジトリリンクを優先して抽出する。
-- 個別選択・全選択・全解除。候補ゼロ件ではクローン操作不可。
-- 保存先は既定で `<root>/<repo>` のフラット配置とする（例: `C:\apps\zip-scope`）。自分のリポジトリだけを扱う前提のため、owner ディレクトリは作らない。保存先フォルダが無ければ自動作成する。
-- 既存ディレクトリには上書き・削除・pull をしない。対象が既存なら skip。既存が Git リポジトリかどうかを結果に示す。
-- Public は `git clone`、Private は認証済みの `gh repo clone` で対応。資格情報やトークンを拡張から送らない。
-- 処理結果は各リポジトリについて `success | skipped | failed`、保存先、短いエラーメッセージで表示。個別失敗しても残りを続ける。
-- チェックを付けたリポジトリは即座に clone する。行に状態（clone 済み / 既にあります / 失敗）を表示する。チェックを外しても clone はしない。
-- 対応 OS はまず Windows。Chrome Manifest V3 を使用。
+GitHub のリポジトリ一覧で欲しいリポジトリにチェックを付けると、
+Windows の指定フォルダへすぐに `git clone` する Chrome 拡張です。
 
-## アーキテクチャ
+[![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](#)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)](#)
+[![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go&logoColor=white)](#)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+[セットアップ](docs/setup.md) · [開発](docs/development.md) · [Chrome Web Store 公開](store/README.md)
+
+</div>
+
+---
+
+## これは何か
+
+GitHub の Web ページからリポジトリ URL を一件ずつコピーして、ターミナルで `git clone` する——この繰り返しをなくすためのツールです。
+
+リポジトリ一覧のチェックボックスにチェックを付けた**その瞬間**に clone が走ります。保存先フォルダが無ければ自動で作られ、既にあるフォルダは変更しません。
+
 ```text
-GitHub Web ページ
-  └─ Chrome Extension (Manifest V3)
-       ├─ content script: 候補抽出とチェックボックス
-       ├─ popup: 一覧・保存先・実行結果
-       └─ service worker: chrome.runtime.connectNative
-            └─ Go Native Messaging Host (Windows)
-                 └─ git / gh コマンドを固定引数で実行
-                      └─ C:\apps\<repo>
+GitHub の一覧ページ
+  └─ ☑ にチェック  →  その場で clone  →  C:\apps\<repo>
 ```
 
-### メッセージ例
-拡張 → ホスト:
-```json
-{"type":"clone","requestId":"example-001","root":"C:\\apps","repositories":["tonbiattack/zip-scope","tonbiattack/archive-extract-cleaner"]}
-```
+## 特徴
 
-ホスト → 拡張（リポジトリ単位）:
-```json
-{"type":"result","requestId":"example-001","repository":"tonbiattack/zip-scope","status":"success","path":"C:\\apps\\tonbiattack\\zip-scope"}
-```
+| | |
+| --- | --- |
+| **チェックで即実行** | ボタンを押す手順がありません。チェックを付けた瞬間に clone します。 |
+| **フォルダは自動作成** | 保存先が無ければ親フォルダごと作ります。事前準備は不要です。 |
+| **既存は触らない** | 同名フォルダがあれば skip。上書き・削除・pull はしません。 |
+| **Private にも対応** | 認証済みの `gh` CLI があれば Private リポジトリも clone できます。 |
+| **資格情報を扱わない** | トークンは拡張に渡しません。認証はローカルの Git / gh に委譲します。 |
+| **シェルを介さない** | Go ホストが固定引数で `git` / `gh` を直接実行します。 |
 
-ホスト → 拡張（完了）:
-```json
-{"type":"done","requestId":"example-001"}
-```
+## 動作環境
 
-Native Messaging の標準入出力は 4-byte little-endian 長 + JSON UTF-8 メッセージ。stdout はプロトコル専用、診断ログは stderr。
+- Windows 10 / 11
+- Google Chrome 102 以降
+- [Go](https://go.dev/dl/) 1.24 以降（ホストのビルドに使用）
+- [Git for Windows](https://git-scm.com/download/win)
+- [GitHub CLI](https://cli.github.com/)（Private リポジトリを使う場合のみ）
 
-## セキュリティ
-- Native Host の `allowed_origins` に当該拡張 ID のみを登録する。
-- ホストで `owner/repo` を厳格に検証。任意 URL、シェルコマンド、Git オプション、相対パス（`..`）は受け付けない。
-- `exec.CommandContext` で直接 git/gh を呼ぶ。cmd.exe や PowerShell で受信文字列を評価しない。
-- クローン先はユーザーが設定したルート配下のみに限定。既存ファイルを上書きせず、シンボリックリンク／ジャンクションを使った逸脱を防ぐ。
-- Git 認証はローカルの Git Credential Manager / gh に委譲。アクセストークンは保存・ログ出力しない。
-- 拡張は `github.com` のみを対象とし、必要最小限の権限にする。
-- 同時実行数とタイムアウトを制限。エラーメッセージに機密情報を出さない。
-
-## 推奨ディレクトリ
-```text
-extension/          # manifest, content script, popup, service worker
-native-host/        # Go CLI host, protocol, clone runner
-installer/          # Windows 登録/解除スクリプト
-docs/               # 開発・導入・テスト手順
-```
-
-## はじめかた
+## インストール
 
 ```powershell
-# 1. 拡張を chrome://extensions で読み込み、表示された ID を控える
-# 2. その ID でネイティブホストを登録する
+git clone https://github.com/tonbiattack/github-bulk-cloner.git
+cd github-bulk-cloner
+```
+
+1. `chrome://extensions` を開き、**デベロッパーモード**を有効にする
+2. **パッケージ化されていない拡張機能を読み込む** で `extension` フォルダを選ぶ
+3. 表示された拡張 ID（32文字）を控える
+4. その ID でネイティブホストを登録する
+
+```powershell
 .\installer\install.ps1 -ExtensionId <32文字の拡張ID>
 ```
 
-詳しい手順は [docs/setup.md](docs/setup.md)、設計とテストは [docs/development.md](docs/development.md) を参照。
+インストーラはビルド・マニフェスト作成・レジストリ登録（HKCU）・疎通確認まで行います。管理者権限は不要です。
 
-## 完了条件（MVP）
-- GitHub のプロフィール上で複数リポジトリを選択できる。
-- 実行ボタンで `C:\apps\<repo>` に実際に clone される。
-- 未認証 Private / 既存ディレクトリ / 不正 URL で安全に失敗またはスキップする。
-- 拡張をリロードしても保存先設定が残る。
-- Windows で Native Host の登録・解除と Chrome 拡張の手動導入手順が再現できる。
-- チェックを付けたリポジトリがその場で clone され、既存フォルダは変更しない。
+詳しい手順とトラブルシューティングは [docs/setup.md](docs/setup.md) を参照してください。
 
-## 開発順序
-Issue を参照。初回はローカル動作・手動インストールを優先し、Chrome Web Store 公開や自動アップデートは後続対応とする。
+## 使い方
+
+1. GitHub で自分のプロフィールの **Repositories** タブを開く
+2. 欲しいリポジトリのチェックボックスにチェックを付ける
+3. 行に状態が出る
+
+| 表示 | 意味 |
+| --- | --- |
+| `clone 中…` | 実行中 |
+| `clone 済み` | 新しく clone した |
+| `既にあります` | 同名フォルダがあったので何もしなかった |
+| 失敗理由 | 認証エラーやネットワークなど |
+
+clone 先は `<保存先>\<repo>` です（既定 `C:\apps`）。保存先はポップアップで変更できます。
+
+### 対応ページ
+
+- プロフィール / Organization の Repositories タブ（`?tab=repositories`）
+- リポジトリ検索結果（`/search?type=repositories`）
+- トピックページ（`/topics/<topic>`）
+- Organization のリポジトリ一覧（`/orgs/<org>/repositories`）
+- ユーザーのリポジトリ一覧（`/<user>/repositories`）
+
+リポジトリ内のページ（`/owner/repo/issues` など）は対象外です。
+
+## 仕組み
+
+```text
+GitHub Web ページ
+  └─ Chrome Extension (Manifest V3)
+       ├─ content script : 候補抽出とチェックボックス
+       ├─ popup          : 保存先・選択一覧・実行結果
+       └─ service worker : chrome.runtime.connectNative
+            └─ Go Native Messaging Host (Windows)
+                 └─ git / gh を固定引数で実行
+                      └─ C:\apps\<repo>
+```
+
+拡張はリポジトリの `owner/repo` だけを送ります。ホストが検証し、`git clone`（Private は `gh repo clone`）を実行して、リポジトリ単位で結果を返します。
+
+### メッセージ
+
+拡張 → ホスト:
+
+```json
+{"type":"clone","requestId":"example-001","root":"C:\\apps","repositories":["owner/repo"]}
+```
+
+ホスト → 拡張（リポジトリ単位）:
+
+```json
+{"type":"result","requestId":"example-001","repository":"owner/repo","status":"success","path":"C:\\apps\\repo","method":"git"}
+```
+
+ホスト → 拡張（完了）:
+
+```json
+{"type":"done","requestId":"example-001","summary":{"success":1,"skipped":0,"failed":0}}
+```
+
+`status` は `success` / `skipped` / `failed`。Native Messaging の標準入出力は 4-byte little-endian 長 + JSON UTF-8 で、stdout はプロトコル専用、診断ログは stderr に出します。
+
+## セキュリティ
+
+- ネイティブホストの `allowed_origins` に当該拡張 ID のみを登録
+- `owner/repo` を厳格に検証し、任意 URL・シェル断片・Git オプション・相対パスを拒否
+- `exec.CommandContext` で直接 `git` / `gh` を呼び、`cmd.exe` や PowerShell で文字列を評価しない
+- clone 先は設定したルート配下に限定し、シンボリックリンク／ジャンクションによる逸脱を防ぐ
+- 既存ファイルを上書き・削除しない
+- 認証はローカルの Git Credential Manager / gh に委譲し、トークンを保存・ログ出力しない
+- 拡張は `github.com` のみを対象とし、権限は `storage` / `nativeMessaging` / `tabs` に限定
+
+## 開発
+
+```powershell
+# Go ホスト
+cd native-host
+go vet ./...
+go test ./... -short     # ネットワーク不要
+go test ./...            # 実クローンを含む
+
+# 拡張のロジック
+node --test extension/test/
+
+# アイコンの再生成
+.\tools\make-icons.ps1
+```
+
+実機 Chrome での確認手順は [docs/development.md](docs/development.md) にまとめています。
+
+### ディレクトリ構成
+
+```text
+extension/       Chrome 拡張（Manifest V3）
+  lib/           URL 判定の純粋ロジック（DOM 非依存）
+  content/       候補抽出とチェックボックス
+  popup/         保存先・選択一覧・実行結果
+  icons/         16 / 32 / 48 / 128 px
+  test/          Node テストと Chrome 実機テスト
+native-host/     Go ネイティブホスト
+  cmd/host/      プロトコルループ
+  internal/      protocol / validate / clone
+installer/       ビルド・登録・解除・疎通確認
+tools/           アイコン生成・ストア素材の撮影
+store/           Chrome Web Store 公開用の資材
+docs/            セットアップと開発の手順書
+```
+
+## 制約
+
+- 同時実行は 1 リクエスト。リポジトリは順番に処理します
+- 1 リクエストあたり最大 200 リポジトリ、1 リポジトリあたり 10 分でタイムアウト
+- 保存先は `<root>/<repo>` のフラット配置（owner ディレクトリは作りません）
+- 既存フォルダの更新（pull）は行いません。手動で `git pull` してください
+- 対応 OS は Windows のみ
+
+## コントリビュート
+
+Issue と Pull Request を歓迎します。変更を送る前に、上記のテストが通ることを確認してください。
+
+## ライセンス
+
+[MIT](LICENSE)
+
+## 謝辞
+
+アイコンとストア素材は `tools/` のスクリプトで生成しています。
