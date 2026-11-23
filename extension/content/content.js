@@ -109,10 +109,10 @@
       updateToolbar();
       notifySelectionChanged();
 
-      // Checking a box pulls that repository straight away. Unchecking only
+      // Checking a box clones that repository straight away. Unchecking only
       // clears the selection; it never touches the working tree.
       if (checkbox.checked) {
-        requestPull(candidate);
+        requestClone(candidate);
       }
     });
 
@@ -137,41 +137,39 @@
     entry.row.classList.toggle(SELECTED_CLASS, isSelected);
   }
 
-  // ------------------------------------------------------------- auto pull
+  // ------------------------------------------------------------ auto clone
 
-  /** Rows currently waiting on a pull, keyed by lowercased spec. */
-  const pendingPulls = new Map();
+  /** Rows currently waiting on a clone, keyed by lowercased spec. */
+  const pendingClones = new Map();
 
   /**
-   * Pulls one repository as soon as its checkbox is checked.
+   * Clones one repository as soon as its checkbox is checked.
    *
    * The service worker owns the native messaging port, so this only sends a
    * request and reflects the outcome on the row.
    */
-  function requestPull(candidate) {
+  function requestClone(candidate) {
     const key = candidate.spec.toLowerCase();
-    if (pendingPulls.has(key)) return;
+    if (pendingClones.has(key)) return;
 
-    setRowStatus(candidate.spec, 'pulling', 'pull 中…');
-    pendingPulls.set(key, true);
+    setRowStatus(candidate.spec, 'working', 'clone 中…');
+    pendingClones.set(key, true);
 
     chrome.runtime.sendMessage({
-      type: 'gbc:startPull',
+      type: 'gbc:startClone',
       repositories: [candidate.spec]
     }).then((result) => {
-      pendingPulls.delete(key);
+      pendingClones.delete(key);
       if (!result) {
-        setRowStatus(candidate.spec, 'failed', 'pull できませんでした');
+        setRowStatus(candidate.spec, 'failed', 'clone できませんでした');
         return;
       }
       if (result.error) {
         setRowStatus(candidate.spec, 'failed', result.error);
-        return;
       }
       // The run is asynchronous; the worker reports the outcome separately.
-      setRowStatus(candidate.spec, 'pulling', 'pull 中…');
     }).catch((error) => {
-      pendingPulls.delete(key);
+      pendingClones.delete(key);
       setRowStatus(candidate.spec, 'failed', String(error && error.message ? error.message : error));
     });
   }
@@ -192,16 +190,16 @@
     badge.title = text || '';
   }
 
-  /** Applies a pull result reported by the service worker. */
-  function applyPullResult(result) {
+  /** Applies a clone result reported by the service worker. */
+  function applyCloneResult(result) {
     if (!result || typeof result.repository !== 'string') return;
 
     switch (result.status) {
-      case 'updated':
-        setRowStatus(result.repository, 'updated', '更新');
+      case 'success':
+        setRowStatus(result.repository, 'success', 'clone 済み');
         break;
-      case 'up-to-date':
-        setRowStatus(result.repository, 'up-to-date', '最新');
+      case 'skipped':
+        setRowStatus(result.repository, 'skipped', '既にあります');
         break;
       case 'failed':
         setRowStatus(result.repository, 'failed', result.message || '失敗');
@@ -422,10 +420,10 @@
 
     switch (message.type) {
       case 'gbc:runUpdate': {
-        // Reflect pull outcomes on the rows as they arrive.
+        // Reflect clone outcomes on the rows as they arrive.
         const state = message.state;
-        if (state && state.kind === 'pull' && Array.isArray(state.results)) {
-          for (const result of state.results) applyPullResult(result);
+        if (state && state.kind === 'clone' && Array.isArray(state.results)) {
+          for (const result of state.results) applyCloneResult(result);
         }
         return false;
       }

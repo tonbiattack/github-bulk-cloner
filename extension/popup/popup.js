@@ -63,8 +63,6 @@
       case 'success': return '成功';
       case 'skipped': return 'スキップ';
       case 'failed': return '失敗';
-      case 'updated': return '更新';
-      case 'up-to-date': return '最新';
       default: return status;
     }
   }
@@ -105,8 +103,7 @@
   }
 
   function renderRun() {
-    const { status, kind, total, completed, results, summary, error } = runState;
-    const isPull = kind === 'pull';
+    const { status, total, completed, results, summary, error } = runState;
 
     if (status === 'running') {
       elements.progress.textContent = total > 0
@@ -129,25 +126,14 @@
       elements.summary.hidden = false;
       elements.summary.replaceChildren();
       const line = document.createElement('div');
-      if (isPull) {
-        line.append(
-          '更新 ',
-          strong(String(summary.updated || 0)),
-          ' / 最新 ',
-          strong(String(summary.upToDate || 0)),
-          ' / 失敗 ',
-          strong(String(summary.failed || 0))
-        );
-      } else {
-        line.append(
-          '成功 ',
-          strong(String(summary.success || 0)),
-          ' / スキップ ',
-          strong(String(summary.skipped || 0)),
-          ' / 失敗 ',
-          strong(String(summary.failed || 0))
-        );
-      }
+      line.append(
+        '成功 ',
+        strong(String(summary.success || 0)),
+        ' / スキップ ',
+        strong(String(summary.skipped || 0)),
+        ' / 失敗 ',
+        strong(String(summary.failed || 0))
+      );
       elements.summary.appendChild(line);
     } else {
       elements.summary.hidden = true;
@@ -312,14 +298,11 @@
       renderRun();
       return;
     }
-    if (result) {
-      runState = result;
-      renderRun();
-    }
+    // The worker queues the request; the run state arrives via gbc:runUpdate.
   });
 
-  // Pulls are started by the content script when a checkbox is checked, so the
-  // popup only displays their progress and results.
+  // Clones are also started by the content script when a checkbox is checked,
+  // so the popup only displays their progress and results.
 
   // The service worker pushes progress while the popup is open.
   chrome.runtime.onMessage.addListener((message) => {

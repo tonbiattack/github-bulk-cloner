@@ -88,9 +88,6 @@ func TestRootRejectsBadInput(t *testing.T) {
 	if _, err := Root("relative/path"); err == nil {
 		t.Error("relative root should fail")
 	}
-	if _, err := Root(filepath.Join(t.TempDir(), "missing")); err == nil {
-		t.Error("missing root should fail")
-	}
 
 	file := filepath.Join(t.TempDir(), "file.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
@@ -98,6 +95,28 @@ func TestRootRejectsBadInput(t *testing.T) {
 	}
 	if _, err := Root(file); err == nil {
 		t.Error("file root should fail")
+	}
+}
+
+// TestRootCreatesMissingDirectory covers the case where the user points at a
+// folder that does not exist yet.
+func TestRootCreatesMissingDirectory(t *testing.T) {
+	base := t.TempDir()
+	missing := filepath.Join(base, "nested", "clone-root")
+
+	got, err := Root(missing)
+	if err != nil {
+		t.Fatalf("Root(%q): %v", missing, err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("resolved root %q is not absolute", got)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("root was not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("created root is not a directory")
 	}
 }
 

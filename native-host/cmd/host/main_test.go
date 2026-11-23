@@ -131,11 +131,43 @@ func TestServeRejectsTooManyRepositories(t *testing.T) {
 	}
 }
 
-func TestServeRejectsInvalidRoot(t *testing.T) {
+// TestServeCreatesMissingRoot covers the case where the user points at a
+// folder that does not exist yet: the host creates it and proceeds.
+func TestServeCreatesMissingRoot(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "does-not-exist")
+
 	msgs := runServe(t, protocol.Request{
 		Type:         protocol.TypeClone,
 		RequestID:    "r1",
-		Root:         filepath.Join(t.TempDir(), "does-not-exist"),
+		Root:         root,
+		Repositories: []string{"owner/repo"},
+	})
+
+	// The root is created, so the request proceeds to the clone attempt. The
+	// repository does not exist, so the result is a failure rather than an
+	// invalid_root error.
+	if len(msgs) == 0 {
+		t.Fatal("expected a response")
+	}
+	if msgs[0]["type"] == protocol.TypeError && msgs[0]["code"] == "invalid_root" {
+		t.Fatalf("missing root should be created, got invalid_root: %v", msgs)
+	}
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		t.Fatalf("root was not created: %v", err)
+	}
+}
+
+func TestServeRejectsFileAsRoot(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := runServe(t, protocol.Request{
+		Type:         protocol.TypeClone,
+		RequestID:    "r1",
+		Root:         file,
 		Repositories: []string{"owner/repo"},
 	})
 	if len(msgs) != 1 || msgs[0]["code"] != "invalid_root" {

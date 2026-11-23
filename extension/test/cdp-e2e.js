@@ -201,14 +201,16 @@ async function main() {
     if (Array.isArray(specs) && specs.length > 0) {
       const run = await evaluate(sw,
         `chrome.runtime.sendMessage({type:"gbc:startClone",repositories:${JSON.stringify(specs)}})`);
-      check('startClone accepted', Boolean(run && run.status), JSON.stringify(run && run.status));
+      check('startClone accepted', Boolean(run && (run.status || run.error)), JSON.stringify(run && (run.status || run.error)));
 
-      // Poll until the run finishes.
+      // The worker queues the request, so poll until a run for these specs
+      // finishes rather than assuming the first poll sees it.
       let state = null;
-      for (let i = 0; i < 120; i++) {
+      for (let i = 0; i < 180; i++) {
         await sleep(1000);
         state = await evaluate(sw, 'chrome.runtime.sendMessage({type:"gbc:getRunState"})');
-        if (state && state.status !== 'running') break;
+        if (state && state.status === 'done' && state.results.length >= specs.length) break;
+        if (state && state.status === 'error') break;
       }
       check('clone run finished', state && state.status === 'done', JSON.stringify(state && state.status));
       if (state && state.results) {

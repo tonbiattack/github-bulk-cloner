@@ -16,7 +16,7 @@ const RUN_STATE_KEY = 'lastRun';
 /** In-memory state for the active run. */
 let runState = {
   status: 'idle', // idle | running | done | error
-  kind: 'clone', // clone | pull
+  kind: 'clone',
   requestId: null,
   total: 0,
   completed: 0,
@@ -110,7 +110,7 @@ function broadcast() {
   chrome.runtime.sendMessage(message).catch(() => {});
 
   // Content scripts are not reached by runtime.sendMessage, so notify the
-  // GitHub tabs separately. This is what updates the per-row pull badges.
+  // GitHub tabs separately. This is what updates the per-row clone badges.
   chrome.tabs.query({ url: 'https://github.com/*' }, (tabs) => {
     if (chrome.runtime.lastError || !tabs) return;
     for (const tab of tabs) {
@@ -143,9 +143,34 @@ function createRequestId() {
 function finishRun(status, error) {
   runState.status = status;
   if (error) runState.error = error;
+  stopWatchdog();
   disconnectPort();
   persistRunState();
   broadcast();
+}
+
+/**
+ * Watchdog for a run that never reports back.
+ *
+ * If the host dies without sending `done` and without a disconnect event, the
+ * run would stay `running` forever and block the queue. Fail it instead.
+ */
+const RUN_TIMEOUT_MS = 15 * 60 * 1000;
+let watchdogTimer = null;
+
+function startWatchdog() {
+  stopWatchdog();
+  watchdogTimer = setTimeout(() => {
+    watchdogTimer = null;
+    if (runState.status !== 'running') return;
+    finishRun('error', 'ネイティブホストから応答がありません。処理を中断しました。');
+  }, RUN_TIMEOUT_MS);
+}
+
+function stopWatchdog() {
+  if (watchdogTimer === null) return;
+  clearTimeout(watchdogTimer);
+  watchdogTimer = null;
 }
 
 function disconnectPort() {
@@ -168,8 +193,6 @@ function describeHostError(code, message) {
       return 'Git が見つかりません。Git for Windows をインストールし、PATH に追加してください。';
     case 'too_many_repositories':
       return '一度に選択できるのは ' + MAX_REPOSITORIES + ' 件までです。';
-    case 'nothing_to_pull':
-      return '保存先に Git リポジトリが見つかりませんでした。先に clone してください。';
     case 'invalid_request':
       return 'リクエストが不正です。' + (message ? ' (' + message + ')' : '');
     case 'cancelled':
@@ -194,56 +217,42 @@ function describeConnectError(error) {
 // -------------------------------------------------------------- run start
 
 /**
- * Repositories waiting for a pull, in the order they were requested.
+ * Repositories waiting to be cloned, in the order they were requested.
  *
  * Checking several boxes in quick succession must not fail with "already
- * running", so pull requests are queued and drained one at a time.
+ * running", so clone requests are queued and drained one at a time. Each queue
+ * entry is one request, so a multi-repository request stays a single run.
  */
-const pullQueue = [];
+const cloneQueue = [];
 let drainingQueue = false;
-/** Set when a "pull everything under the root" request is queued. */
-let pullAllQueued = false;
 
-/** Queues a pull for one or more repositories, or for the whole root. */
-function enqueuePull(repositories) {
+/** Queues a clone request. */
+function enqueueClone(repositories) {
   const specs = (Array.isArray(repositories) ? repositories : [])
     .filter((spec) => typeof spec === 'string' && spec.trim() !== '')
     .map((spec) => spec.trim());
 
-  if (specs.length === 0) {
-    // An empty list means "every repository under the root".
-    pullAllQueued = true;
-  } else {
-    for (const spec of specs) {
-      if (!pullQueue.includes(spec)) pullQueue.push(spec);
-    }
-  }
-  drainPullQueue();
+  if (specs.length === 0) return;
+  cloneQueue.push(specs);
+  drainCloneQueue();
 }
 
-/** Runs queued pulls one at a time until the queue is empty. */
-async function drainPullQueue() {
+/** Runs queued clone requests one at a time until the queue is empty. */
+async function drainCloneQueue() {
   if (drainingQueue) return;
   drainingQueue = true;
 
   try {
-    while (pullAllQueued || pullQueue.length > 0) {
+    while (cloneQueue.length > 0) {
       if (runState.status === 'running') {
         // Wait for the active run to finish before starting the next one.
         await new Promise((resolve) => setTimeout(resolve, 250));
         continue;
       }
 
-      let specs;
-      if (pullAllQueued) {
-        pullAllQueued = false;
-        specs = [];
-      } else {
-        specs = [pullQueue.shift()];
-      }
-
+      const specs = cloneQueue.shift();
       try {
-        await startRun('pull', specs);
+        await startRun('clone', specs);
       } catch {
         // A failed start is reported through the run state; keep draining.
       }
@@ -260,23 +269,21 @@ async function drainPullQueue() {
 /**
  * Starts a native host run.
  *
- * @param {'clone'|'pull'} kind
- * @param {string[]} repositories owner/repo specs. For pull, an empty array
- *   means "every repository under the root".
+ * @param {'clone'} kind
+ * @param {string[]} repositories owner/repo specs.
  */
 async function startRun(kind, repositories) {
   if (runState.status === 'running') {
     throw new Error('すでに実行中です');
   }
 
-  const isPull = kind === 'pull';
   const specs = Array.from(new Set(
     (Array.isArray(repositories) ? repositories : [])
       .filter((spec) => typeof spec === 'string' && spec.trim() !== '')
       .map((spec) => spec.trim())
   ));
 
-  if (!isPull && specs.length === 0) {
+  if (specs.length === 0) {
     throw new Error('リポジトリが選択されていません');
   }
   if (specs.length > MAX_REPOSITORIES) {
@@ -284,9 +291,10 @@ async function startRun(kind, repositories) {
   }
 
   const { root } = await getSettings();
-  resetRun(isPull ? 0 : specs.length, kind);
+  resetRun(specs.length, kind);
   await persistRunState();
   broadcast();
+  startWatchdog();
 
   let connected;
   try {
@@ -312,14 +320,11 @@ async function startRun(kind, repositories) {
           existingGitRepo: message.existingGitRepo
         });
         runState.completed = runState.results.length;
-        // A pull discovers its own targets, so the total grows as results
-        // arrive until the done frame fixes it.
-        if (runState.kind === 'pull') runState.total = runState.results.length;
         broadcast();
         break;
 
       case 'done':
-        runState.summary = message.summary || summarize(runState.results, runState.kind);
+        runState.summary = message.summary || summarize(runState.results);
         runState.total = runState.results.length;
         runState.completed = runState.results.length;
         finishRun('done', null);
@@ -344,7 +349,7 @@ async function startRun(kind, repositories) {
 
     // The host exits after `done`; a disconnect before that is a failure.
     if (runState.completed >= runState.total && runState.total > 0) {
-      runState.summary = runState.summary || summarize(runState.results, runState.kind);
+      runState.summary = runState.summary || summarize(runState.results);
       finishRun('done', null);
       return;
     }
@@ -372,22 +377,7 @@ function startClone(repositories) {
   return startRun('clone', repositories);
 }
 
-/** Starts a pull run. An empty list means every repository under the root. */
-function startPull(repositories) {
-  return startRun('pull', repositories);
-}
-
-function summarize(results, kind) {
-  if (kind === 'pull') {
-    const summary = { updated: 0, upToDate: 0, failed: 0 };
-    for (const result of results) {
-      if (result.status === 'updated') summary.updated++;
-      else if (result.status === 'up-to-date') summary.upToDate++;
-      else summary.failed++;
-    }
-    return summary;
-  }
-
+function summarize(results) {
   const summary = { success: 0, skipped: 0, failed: 0 };
   for (const result of results) {
     if (result.status === 'success') summary.success++;
@@ -460,16 +450,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
 
     case 'gbc:startClone':
-      startClone(message.repositories)
-        .then(sendResponse)
-        .catch((error) => sendResponse({ error: String(error && error.message ? error.message : error) }));
-      return true;
-
-    case 'gbc:startPull':
       // Queue the request so rapid checkbox clicks are serialised rather than
       // rejected with "already running".
-      enqueuePull(message.repositories);
-      sendResponse({ status: 'queued', kind: 'pull' });
+      enqueueClone(message.repositories);
+      sendResponse({ status: 'queued', kind: 'clone' });
       return false;
 
     case 'gbc:getRunState':

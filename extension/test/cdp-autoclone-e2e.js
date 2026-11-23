@@ -1,13 +1,13 @@
 'use strict';
 
 /**
- * Live check of "checking a box pulls that repository immediately".
+ * Live check of "checking a box clones that repository immediately".
  *
  * Loads a real GitHub listing page, checks one box, and verifies that the
- * extension starts a pull for exactly that repository and shows the outcome
- * on the row.
+ * extension clones exactly that repository into the configured root, creating
+ * the root folder when it does not exist.
  *
- * Usage: node extension/test/cdp-autopull-e2e.js <extensionId> <cloneRoot>
+ * Usage: node extension/test/cdp-autoclone-e2e.js <extensionId> <scratchDir>
  */
 
 const { execFileSync } = require('node:child_process');
@@ -16,23 +16,20 @@ const path = require('node:path');
 
 const CDP_PORT = process.env.CDP_PORT || '9340';
 const EXTENSION_ID = process.argv[2];
-const CLONE_ROOT = process.argv[3];
+const SCRATCH = process.argv[3];
 
-if (!EXTENSION_ID || !CLONE_ROOT) {
-  console.error('usage: node cdp-autopull-e2e.js <extensionId> <cloneRoot>');
+if (!EXTENSION_ID || !SCRATCH) {
+  console.error('usage: node cdp-autoclone-e2e.js <extensionId> <scratchDir>');
   process.exit(1);
 }
 
 const GITHUB_URL = 'https://github.com/tonbiattack?tab=repositories';
+const REPO_NAME = 'github-bulk-cloner';
 
 const checks = [];
 function check(name, ok, detail) {
   checks.push({ name, ok, detail });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
-}
-
-function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
 function sleep(ms) {
@@ -86,14 +83,10 @@ async function evaluate(client, expression) {
 }
 
 async function main() {
-  // A real clone of one of the user's repositories, so the pull has a target.
-  fs.rmSync(CLONE_ROOT, { recursive: true, force: true });
-  fs.mkdirSync(CLONE_ROOT, { recursive: true });
-  const repoName = 'github-bulk-cloner';
-  const target = path.join(CLONE_ROOT, repoName);
-  execFileSync('git', ['clone', '--depth', '1',
-    'https://github.com/tonbiattack/github-bulk-cloner.git', target], { encoding: 'utf8' });
-  check('fixture repository cloned', fs.existsSync(path.join(target, '.git')));
+  // The root deliberately does not exist, to prove the host creates it.
+  fs.rmSync(SCRATCH, { recursive: true, force: true });
+  const root = path.join(SCRATCH, 'nested', 'clone-root');
+  check('clone root does not exist yet', !fs.existsSync(root), root);
 
   // ------------------------------------------------------- extension context
   const popupUrl = `chrome-extension://${EXTENSION_ID}/popup/popup.html`;
@@ -108,8 +101,8 @@ async function main() {
   await worker.send('Runtime.enable');
 
   const saved = await evaluate(worker,
-    `chrome.runtime.sendMessage({type:"gbc:saveSettings",settings:{root:${JSON.stringify(CLONE_ROOT)}}})`);
-  check('clone root saved', saved && saved.root === CLONE_ROOT, JSON.stringify(saved));
+    `chrome.runtime.sendMessage({type:"gbc:saveSettings",settings:{root:${JSON.stringify(root)}}})`);
+  check('clone root saved', saved && saved.root === root, JSON.stringify(saved));
 
   // Close stale listing tabs so the content script is fresh.
   await evaluate(worker, `
@@ -132,7 +125,6 @@ async function main() {
   const page = await connect(pageTarget.webSocketDebuggerUrl);
   await page.send('Runtime.enable');
 
-  // The content script injects after the page settles, so poll for the boxes.
   let boxCount = 0;
   for (let i = 0; i < 30; i++) {
     boxCount = await evaluate(page, 'document.querySelectorAll(".gbc-checkbox").length');
@@ -141,11 +133,11 @@ async function main() {
   }
   check('checkboxes present', boxCount > 0, `${boxCount} boxes`);
 
-  // Find the checkbox for the repository we cloned.
+  // Check the box for the target repository.
   const found = await evaluate(page, `
     (() => {
       const boxes = [...document.querySelectorAll('.gbc-checkbox')];
-      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${repoName}'));
+      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${REPO_NAME}'));
       if (!match) return null;
       match.click();
       return match.dataset.gbcSpec;
@@ -153,65 +145,85 @@ async function main() {
   `);
   check('found and checked the target repository', Boolean(found), String(found));
 
-  // The row should show a pull status almost immediately.
+  // The row should show a clone status almost immediately.
   await sleep(1500);
   const rowStatus = await evaluate(page, `
     (() => {
       const boxes = [...document.querySelectorAll('.gbc-checkbox')];
-      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${repoName}'));
+      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${REPO_NAME}'));
       if (!match) return null;
       const badge = match.parentElement.querySelector('.gbc-row-status');
       return badge ? { state: badge.dataset.state, text: badge.textContent } : null;
     })()
   `);
-  check('row shows a pull status', Boolean(rowStatus), JSON.stringify(rowStatus));
+  check('row shows a clone status', Boolean(rowStatus), JSON.stringify(rowStatus));
 
-  // Wait for the run to finish and confirm it targeted this repository.
+  // Wait for the run to finish.
   let state = null;
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 120; i++) {
     await sleep(1000);
     state = await evaluate(worker, 'chrome.runtime.sendMessage({type:"gbc:getRunState"})');
-    if (state && state.status !== 'running' && state.kind === 'pull') break;
+    if (state && state.status !== 'running') break;
   }
-  check('a pull run ran', state && state.kind === 'pull', JSON.stringify(state && state.kind));
-  check('pull targeted the checked repository',
+  check('clone run finished', state && state.status === 'done', JSON.stringify(state && state.status));
+  check('clone targeted the checked repository',
     state && state.results.length === 1 &&
-    String(state.results[0].repository).toLowerCase().endsWith('/' + repoName),
+    String(state.results[0].repository).toLowerCase().endsWith('/' + REPO_NAME),
     JSON.stringify(state && state.results.map((r) => r.repository)));
 
-  const finalStatus = state && state.results[0] ? state.results[0].status : null;
-  check('pull reported a pull status',
-    ['updated', 'up-to-date', 'failed'].includes(finalStatus), String(finalStatus));
+  const result = state && state.results[0];
+  check('clone succeeded', result && result.status === 'success',
+    JSON.stringify(result && result.status));
 
-  // The row badge should reflect the final outcome.
+  // ------------------------------------------------- verify on-disk effects
+  check('clone root was created', fs.existsSync(root), root);
+
+  const target = path.join(root, REPO_NAME);
+  check('repository cloned directly under the root', fs.existsSync(path.join(target, '.git')), target);
+  check('no owner directory was created',
+    !fs.existsSync(path.join(root, 'tonbiattack')),
+    path.join(root, 'tonbiattack'));
+
+  if (fs.existsSync(path.join(target, '.git'))) {
+    const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: target, encoding: 'utf8'
+    }).trim();
+    check('remote points at the right repository',
+      remote.toLowerCase().includes(REPO_NAME), remote);
+  }
+
+  // The row badge should reflect the outcome.
   await sleep(1000);
   const finalBadge = await evaluate(page, `
     (() => {
       const boxes = [...document.querySelectorAll('.gbc-checkbox')];
-      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${repoName}'));
+      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${REPO_NAME}'));
       if (!match) return null;
       const badge = match.parentElement.querySelector('.gbc-row-status');
       return badge ? { state: badge.dataset.state, text: badge.textContent } : null;
     })()
   `);
-  check('row badge reflects the outcome',
-    finalBadge && ['updated', 'up-to-date', 'failed'].includes(finalBadge.state),
-    JSON.stringify(finalBadge));
+  check('row badge shows the clone outcome',
+    finalBadge && finalBadge.state === 'success', JSON.stringify(finalBadge));
 
-  // Unchecking must not start another pull.
-  const before = await evaluate(worker, 'chrome.runtime.sendMessage({type:"gbc:getRunState"})');
+  // -------------------------------------------------- checking again skips
   await evaluate(page, `
     (() => {
       const boxes = [...document.querySelectorAll('.gbc-checkbox')];
-      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${repoName}'));
-      if (match) match.click();
+      const match = boxes.find((b) => (b.dataset.gbcSpec || '').toLowerCase().endsWith('/${REPO_NAME}'));
+      if (match) { match.click(); match.click(); }
     })()
   `);
-  await sleep(2000);
-  const after = await evaluate(worker, 'chrome.runtime.sendMessage({type:"gbc:getRunState"})');
-  check('unchecking does not start a pull',
-    before.requestId === after.requestId,
-    `${before.requestId} -> ${after.requestId}`);
+
+  let second = null;
+  for (let i = 0; i < 60; i++) {
+    await sleep(1000);
+    second = await evaluate(worker, 'chrome.runtime.sendMessage({type:"gbc:getRunState"})');
+    if (second && second.status !== 'running' && second.requestId !== state.requestId) break;
+  }
+  check('re-checking an existing repository skips it',
+    second && second.results.length > 0 && second.results[0].status === 'skipped',
+    JSON.stringify(second && second.results.map((r) => r.status)));
 
   page.close();
   worker.close();

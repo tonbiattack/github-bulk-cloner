@@ -22,7 +22,7 @@
   outline-offset: 2px;
 }
 
-/* Per-row pull status shown next to the checkbox. */
+/* Per-row clone status shown next to the checkbox. */
 .gbc-row-status {
   margin-left: 4px;
   padding: 0 5px;
@@ -32,19 +32,19 @@
   vertical-align: middle;
 }
 
-.gbc-row-status[data-state="pulling"] {
+.gbc-row-status[data-state="working"] {
   color: #59636e;
   background: rgba(89, 99, 110, 0.14);
 }
 
-.gbc-row-status[data-state="updated"] {
+.gbc-row-status[data-state="success"] {
   color: #1a7f37;
   background: rgba(26, 127, 55, 0.14);
 }
 
-.gbc-row-status[data-state="up-to-date"] {
-  color: #59636e;
-  background: rgba(89, 99, 110, 0.14);
+.gbc-row-status[data-state="skipped"] {
+  color: #9a6700;
+  background: rgba(154, 103, 0, 0.14);
 }
 
 .gbc-row-status[data-state="failed"] {
@@ -53,9 +53,14 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .gbc-row-status[data-state="updated"] {
+  .gbc-row-status[data-state="success"] {
     color: #3fb950;
     background: rgba(63, 185, 80, 0.16);
+  }
+
+  .gbc-row-status[data-state="skipped"] {
+    color: #d29922;
+    background: rgba(210, 153, 34, 0.16);
   }
 
   .gbc-row-status[data-state="failed"] {

@@ -102,9 +102,7 @@ go test ./...               # 実クローンを含む
 | `internal/protocol/protocol_test.go` | フレームの読み書き、長さ上限、切り詰め、並行書き込み |
 | `internal/validate/validate_test.go` | `owner/repo` の許可・拒否、root 検証、パス封じ込め、ジャンクション逸脱 |
 | `internal/clone/runner_test.go` | 不正入力の事前拒否、既存 skip、認証エラー判定、メッセージ整形、実クローン |
-| `internal/clone/pull_test.go` | 最新 / 更新 / 分岐拒否 / 未コミット変更の保持 / リポジトリ検出 |
 | `cmd/host/main_test.go` | ping、未対応種別、入力検証、重複排除、失敗後も継続、EOF |
-| `cmd/host/pull_test.go` | pull の自動検出、名前指定、失敗後も継続、summary、キャンセル |
 
 ### 拡張（Node）
 
@@ -147,34 +145,20 @@ node extension/test/cdp-e2e.js <32文字> $cloneRoot
 - 全選択・全解除・再スキャンでの重複なし
 - 実際の clone と結果表示、秘密情報が混ざらないこと
 
-一括 pull は別スクリプトで確認します。実リポジトリを 3 つ用意し、最新・更新あり・分岐の 3 状態を作って検証します。
+チェック時の自動 clone は別スクリプトで確認します。保存先を存在しないパスにして、フォルダ作成まで検証します。
 
 ```powershell
 $env:CDP_PORT = '9339'
-node extension/test/cdp-pull-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-pull-scratch')
+node extension/test/cdp-autoclone-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-autoclone-scratch')
 ```
 
-`cdp-pull-e2e.js` が確認する内容:
+`cdp-autoclone-e2e.js` が確認する内容:
 
-- ホストの自動検出が保存先配下のリポジトリを見つける（`repositories` が空の経路）
-- 最新のリポジトリが `up-to-date` になる
-- 新しいコミットがあるリポジトリが `updated` になり、実際にファイルが更新される
-- 分岐したリポジトリが `failed` になり、**HEAD とローカルファイルが変わらない**
-- 名前指定の pull がそのリポジトリだけを対象にする
-- リポジトリが無い保存先で実行可能なエラーを返す
-
-チェック時の自動 pull は別スクリプトで確認します。
-
-```powershell
-$env:CDP_PORT = '9339'
-node extension/test/cdp-autopull-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-autopull-root')
-```
-
-`cdp-autopull-e2e.js` が確認する内容:
-
-- チェックを付けたリポジトリだけが pull される
-- 行に状態バッジが出て、最終結果（更新 / 最新 / 失敗）に変わる
-- チェックを外しても pull が走らない
+- チェックを付けたリポジトリだけが clone される
+- 保存先フォルダが無ければ作成される
+- clone 先が `<root>/<repo>` で、owner フォルダが作られない
+- 行に状態バッジが出て、最終結果（clone 済み / 既にあります / 失敗）に変わる
+- 既にあるリポジトリを再チェックすると `skipped` になる
 
 ### ホスト単体
 
@@ -193,23 +177,13 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 {"type":"clone","requestId":"...","root":"C:\\apps","repositories":["owner/repo"]}
 ```
 
-拡張 → ホスト（pull）:
-
-```json
-{"type":"pull","requestId":"...","root":"C:\\apps","repositories":[]}
-```
-
-`repositories` が空のとき、ホストは `root` 配下の Git リポジトリを自動検出してすべて pull します。特定のものだけ更新したい場合は `owner/repo` を並べます。
-
 ホスト → 拡張（リポジトリ単位）:
 
 ```json
 {"type":"result","requestId":"...","repository":"owner/repo","status":"success","path":"C:\\apps\\repo","method":"git"}
 ```
 
-clone の `status` は `success` / `skipped` / `failed`。`skipped` のときは `existingGitRepo` が付きます。
-
-pull の `status` は `updated`（新しいコミットを取り込んだ）/ `up-to-date`（既に最新）/ `failed`。
+`status` は `success` / `skipped` / `failed`。`skipped` のときは `existingGitRepo` が付きます。
 
 ホスト → 拡張（完了）:
 
@@ -217,56 +191,41 @@ pull の `status` は `updated`（新しいコミットを取り込んだ）/ `u
 {"type":"done","requestId":"...","summary":{"success":1,"skipped":0,"failed":0}}
 ```
 
-pull の summary は `{"updated":1,"upToDate":2,"failed":0}` になります。
-
 ホスト → 拡張（要求単位のエラー）:
 
 ```json
 {"type":"error","requestId":"...","code":"invalid_root","message":"..."}
 ```
 
-`code` は `invalid_request` / `invalid_root` / `git_missing` / `too_many_repositories` / `nothing_to_pull` / `unsupported_type` / `cancelled`。
+`code` は `invalid_request` / `invalid_root` / `git_missing` / `too_many_repositories` / `unsupported_type` / `cancelled`。
 
 `ping` には `{"type":"pong","version":"0.1.0"}` が返ります。
 
-## git pull
+## チェック時の自動 clone
 
-チェックボックスにチェックを付けると、そのリポジトリを**その場で pull** します。GitHub のページを開いたまま更新できます。
+チェックボックスにチェックを付けると、そのリポジトリを**その場で clone** します。GitHub のページを開いたまま実行できます。
 
-### チェック時の自動 pull
-
-- チェックを付けた瞬間に、そのリポジトリだけを pull する
-- 行のチェックボックス横に状態を表示する（`pull 中…` / `更新` / `最新` / 失敗理由）
-- **チェックを外しても pull はしない**。選択が外れるだけ
+- チェックを付けた瞬間に、そのリポジトリだけを clone する
+- 行のチェックボックス横に状態を表示する（`clone 中…` / `clone 済み` / `既にあります` / 失敗理由）
+- **チェックを外しても clone はしない**。選択が外れるだけ
 - 連続でチェックしても「すでに実行中」にならないよう、service worker 側でキューに積んで 1 件ずつ処理する
 
-### 安全側に倒した挙動
+### 保存先の扱い
 
 | 状況 | 挙動 |
 | --- | --- |
-| 既に最新 | `up-to-date`。何も変更しない |
-| 新しいコミットあり | `updated`。fast-forward で取り込む |
-| ローカルと分岐（diverged） | `failed`。マージコミットを作らず、履歴を書き換えない |
-| 未コミットの変更あり | `failed`。stash も破棄もしない |
-| 追跡ブランチが未設定 | `failed`。`git pull` は実行しない |
-| リポジトリでないディレクトリ | `failed` |
+| 保存先フォルダが無い | 親フォルダごと自動作成する |
+| 保存先が相対パス | `invalid_root` で拒否する |
+| 保存先がファイル | `invalid_root` で拒否する |
+| 保存先に同名フォルダがある | `skipped`。上書き・削除・pull をしない |
+| 保存先が書き込めない | 作成に失敗し `invalid_root` を返す |
 
-`git pull --ff-only --no-rebase` を使うため、**マージ・リベース・stash・reset は一切行いません**。ローカルの作業が失われることはありません。
-
-### ホスト側の自動検出
-
-ホストは `pull` 要求で `repositories` が空のとき、保存先配下の Git リポジトリを自動検出して pull します。現在の拡張 UI は常にリポジトリを明示するため、この経路は使われていませんが、ホスト単体の確認用に残しています。
-
-- 保存先直下の `<root>/<repo>` が基本の配置
-- リポジトリの中は再帰しない（ネストした checkout を二重に数えない）
-- `.git` と `node_modules` は走査しない
-- 深さは 4 階層まで、1 回あたり 500 件まで
-- 表示名は origin が GitHub なら `owner/repo`、それ以外はディレクトリ名
+clone 先は `<root>/<repo>` のフラット配置です。owner ディレクトリは作りません。
 
 ## 制約
 
 - 同時実行は 1 リクエスト。リポジトリは順番に処理する。
 - 1 リクエストあたり最大 200 リポジトリ。
 - 1 リポジトリあたりのタイムアウトは 10 分。
-- 保存先 root は事前に存在している必要がある（ホストは作らない）。
 - 保存先は `<root>/<repo>` のフラット配置。owner ディレクトリは作らない。
+- 保存先フォルダが無ければ自動作成する。相対パスとファイルは拒否する。

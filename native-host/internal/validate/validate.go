@@ -105,7 +105,8 @@ func checkRepoName(name string) error {
 }
 
 // Root validates the user-configured clone root and returns its fully resolved
-// path. The directory must already exist; this host never creates the root.
+// path. A missing directory is created, because the user should not have to
+// prepare the folder before cloning into it.
 func Root(root string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", errors.New("root directory is empty")
@@ -114,13 +115,22 @@ func Root(root string) (string, error) {
 		return "", fmt.Errorf("root %q must be an absolute path", root)
 	}
 	cleaned := filepath.Clean(root)
+
 	info, err := os.Stat(cleaned)
-	if err != nil {
+	switch {
+	case err == nil:
+		if !info.IsDir() {
+			return "", fmt.Errorf("root %q is not a directory", cleaned)
+		}
+	case errors.Is(err, os.ErrNotExist):
+		// Create the folder, including any missing parents.
+		if mkErr := os.MkdirAll(cleaned, 0o755); mkErr != nil {
+			return "", fmt.Errorf("root %q cannot be created: %w", cleaned, mkErr)
+		}
+	default:
 		return "", fmt.Errorf("root %q is not accessible: %w", cleaned, err)
 	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("root %q is not a directory", cleaned)
-	}
+
 	real, err := filepath.EvalSymlinks(cleaned)
 	if err != nil {
 		return "", fmt.Errorf("root %q cannot be resolved: %w", cleaned, err)
