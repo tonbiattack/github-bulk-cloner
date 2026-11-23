@@ -102,7 +102,9 @@ go test ./...               # 実クローンを含む
 | `internal/protocol/protocol_test.go` | フレームの読み書き、長さ上限、切り詰め、並行書き込み |
 | `internal/validate/validate_test.go` | `owner/repo` の許可・拒否、root 検証、パス封じ込め、ジャンクション逸脱 |
 | `internal/clone/runner_test.go` | 不正入力の事前拒否、既存 skip、認証エラー判定、メッセージ整形、実クローン |
+| `internal/clone/pull_test.go` | 最新 / 更新 / 分岐拒否 / 未コミット変更の保持 / リポジトリ検出 |
 | `cmd/host/main_test.go` | ping、未対応種別、入力検証、重複排除、失敗後も継続、EOF |
+| `cmd/host/pull_test.go` | pull の自動検出、名前指定、失敗後も継続、summary、キャンセル |
 
 ### 拡張（Node）
 
@@ -145,6 +147,22 @@ node extension/test/cdp-e2e.js <32文字> $cloneRoot
 - 全選択・全解除・再スキャンでの重複なし
 - 実際の clone と結果表示、秘密情報が混ざらないこと
 
+一括 pull は別スクリプトで確認します。実リポジトリを 3 つ用意し、最新・更新あり・分岐の 3 状態を作って検証します。
+
+```powershell
+$env:CDP_PORT = '9339'
+node extension/test/cdp-pull-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-pull-scratch')
+```
+
+`cdp-pull-e2e.js` が確認する内容:
+
+- 「すべて pull」が保存先配下のリポジトリを検出する
+- 最新のリポジトリが `up-to-date` になる
+- 新しいコミットがあるリポジトリが `updated` になり、実際にファイルが更新される
+- 分岐したリポジトリが `failed` になり、**HEAD とローカルファイルが変わらない**
+- 名前指定の pull がそのリポジトリだけを対象にする
+- リポジトリが無い保存先で実行可能なエラーを返す
+
 ### ホスト単体
 
 Chrome を介さず、プロトコルを直接叩いて確認できます。
@@ -156,11 +174,19 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 
 ## メッセージ仕様
 
-拡張 → ホスト:
+拡張 → ホスト（clone）:
 
 ```json
 {"type":"clone","requestId":"...","root":"C:\\apps","repositories":["owner/repo"]}
 ```
+
+拡張 → ホスト（pull）:
+
+```json
+{"type":"pull","requestId":"...","root":"C:\\apps","repositories":[]}
+```
+
+`repositories` が空のとき、ホストは `root` 配下の Git リポジトリを自動検出してすべて pull します。特定のものだけ更新したい場合は `owner/repo` を並べます。
 
 ホスト → 拡張（リポジトリ単位）:
 
@@ -168,7 +194,9 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 {"type":"result","requestId":"...","repository":"owner/repo","status":"success","path":"C:\\apps\\owner\\repo","method":"git"}
 ```
 
-`status` は `success` / `skipped` / `failed`。`skipped` のときは `existingGitRepo` が付きます。
+clone の `status` は `success` / `skipped` / `failed`。`skipped` のときは `existingGitRepo` が付きます。
+
+pull の `status` は `updated`（新しいコミットを取り込んだ）/ `up-to-date`（既に最新）/ `failed`。
 
 ホスト → 拡張（完了）:
 
@@ -176,15 +204,42 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 {"type":"done","requestId":"...","summary":{"success":1,"skipped":0,"failed":0}}
 ```
 
+pull の summary は `{"updated":1,"upToDate":2,"failed":0}` になります。
+
 ホスト → 拡張（要求単位のエラー）:
 
 ```json
 {"type":"error","requestId":"...","code":"invalid_root","message":"..."}
 ```
 
-`code` は `invalid_request` / `invalid_root` / `git_missing` / `too_many_repositories` / `unsupported_type` / `cancelled`。
+`code` は `invalid_request` / `invalid_root` / `git_missing` / `too_many_repositories` / `nothing_to_pull` / `unsupported_type` / `cancelled`。
 
 `ping` には `{"type":"pong","version":"0.1.0"}` が返ります。
+
+## 一括 git pull
+
+ポップアップの「保存先をすべて pull」は、保存先フォルダ配下を走査して Git リポジトリを探し、まとめて更新します。GitHub のページを開いていなくても動きます。
+
+### 安全側に倒した挙動
+
+| 状況 | 挙動 |
+| --- | --- |
+| 既に最新 | `up-to-date`。何も変更しない |
+| 新しいコミットあり | `updated`。fast-forward で取り込む |
+| ローカルと分岐（diverged） | `failed`。マージコミットを作らず、履歴を書き換えない |
+| 未コミットの変更あり | `failed`。stash も破棄もしない |
+| 追跡ブランチ未設定 | `failed`。`git pull` は実行しない |
+| リポジトリでないディレクトリ | `failed` |
+
+`git pull --ff-only --no-rebase` を使うため、**マージ・リベース・stash・reset は一切行いません**。ローカルの作業が失われることはありません。
+
+### 検出のルール
+
+- `<root>/<owner>/<repo>` の形なら `owner/repo` として報告する
+- それ以外の深さでも Git リポジトリなら、root からの相対パスで報告する
+- リポジトリの中は再帰しない（ネストした checkout を二重に数えない）
+- `.git` と `node_modules` は走査しない
+- 深さは 4 階層まで、1 回あたり 500 件まで
 
 ## 制約
 

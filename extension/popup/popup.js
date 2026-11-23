@@ -17,6 +17,9 @@
     clear: document.getElementById('clear'),
     clone: document.getElementById('clone'),
     cloneHint: document.getElementById('clone-hint'),
+    pullAll: document.getElementById('pull-all'),
+    pullSelected: document.getElementById('pull-selected'),
+    pullHint: document.getElementById('pull-hint'),
     progress: document.getElementById('progress'),
     summary: document.getElementById('summary'),
     resultList: document.getElementById('result-list'),
@@ -28,7 +31,15 @@
   /** Whether the active tab is a supported GitHub listing page. */
   let supported = false;
   /** Latest run state from the service worker. */
-  let runState = { status: 'idle', total: 0, completed: 0, results: [], summary: null, error: null };
+  let runState = {
+    status: 'idle',
+    kind: 'clone',
+    total: 0,
+    completed: 0,
+    results: [],
+    summary: null,
+    error: null
+  };
 
   // ------------------------------------------------------------- utilities
 
@@ -55,6 +66,8 @@
       case 'success': return '成功';
       case 'skipped': return 'スキップ';
       case 'failed': return '失敗';
+      case 'updated': return '更新';
+      case 'up-to-date': return '最新';
       default: return status;
     }
   }
@@ -83,26 +96,35 @@
     const running = runState.status === 'running';
     elements.clone.disabled = running || selected.length === 0 || !supported;
 
+    // Pull works from the saved root, so it does not need a GitHub page.
+    elements.pullAll.disabled = running;
+    elements.pullSelected.disabled = running || selected.length === 0;
+
     if (running) {
       setHint(elements.cloneHint, '実行中です…', false);
+      setHint(elements.pullHint, '実行中です…', false);
     } else if (!supported) {
       setHint(elements.cloneHint, 'GitHub のリポジトリ一覧ページを開いてください。', false);
+      setHint(elements.pullHint, '保存先フォルダ配下の Git リポジトリを fast-forward のみで更新します。', false);
     } else if (selected.length === 0) {
       setHint(elements.cloneHint, 'リポジトリを選択してください。', false);
+      setHint(elements.pullHint, '保存先フォルダ配下の Git リポジトリを fast-forward のみで更新します。', false);
     } else {
       setHint(elements.cloneHint, selected.length + ' 件を clone します。', false);
+      setHint(elements.pullHint, selected.length + ' 件を pull します。', false);
     }
   }
 
   function renderRun() {
-    const { status, total, completed, results, summary, error } = runState;
+    const { status, kind, total, completed, results, summary, error } = runState;
+    const isPull = kind === 'pull';
 
     if (status === 'running') {
-      elements.progress.textContent = completed + ' / ' + total;
+      elements.progress.textContent = total > 0
+        ? completed + ' / ' + total
+        : completed + ' 件処理中';
     } else if (status === 'done' && summary) {
-      elements.progress.textContent = total + ' 件完了';
-    } else if (status === 'error') {
-      elements.progress.textContent = '';
+      elements.progress.textContent = results.length + ' 件完了';
     } else {
       elements.progress.textContent = '';
     }
@@ -118,14 +140,25 @@
       elements.summary.hidden = false;
       elements.summary.replaceChildren();
       const line = document.createElement('div');
-      line.append(
-        '成功 ',
-        strong(String(summary.success)),
-        ' / スキップ ',
-        strong(String(summary.skipped)),
-        ' / 失敗 ',
-        strong(String(summary.failed))
-      );
+      if (isPull) {
+        line.append(
+          '更新 ',
+          strong(String(summary.updated || 0)),
+          ' / 最新 ',
+          strong(String(summary.upToDate || 0)),
+          ' / 失敗 ',
+          strong(String(summary.failed || 0))
+        );
+      } else {
+        line.append(
+          '成功 ',
+          strong(String(summary.success || 0)),
+          ' / スキップ ',
+          strong(String(summary.skipped || 0)),
+          ' / 失敗 ',
+          strong(String(summary.failed || 0))
+        );
+      }
       elements.summary.appendChild(line);
     } else {
       elements.summary.hidden = true;
@@ -280,6 +313,7 @@
     if (result && result.error) {
       runState = {
         status: 'error',
+        kind: 'clone',
         total: selected.length,
         completed: 0,
         results: [],
@@ -293,6 +327,38 @@
       runState = result;
       renderRun();
     }
+  });
+
+  /** Starts a pull run and renders the outcome. */
+  async function startPull(repositories) {
+    const result = await sendToWorker({ type: 'gbc:startPull', repositories });
+    if (result && result.error) {
+      runState = {
+        status: 'error',
+        kind: 'pull',
+        total: 0,
+        completed: 0,
+        results: [],
+        summary: null,
+        error: result.error
+      };
+      renderRun();
+      return;
+    }
+    if (result) {
+      runState = result;
+      renderRun();
+    }
+  }
+
+  elements.pullAll.addEventListener('click', () => {
+    // An empty list tells the host to discover every repository under the root.
+    startPull([]);
+  });
+
+  elements.pullSelected.addEventListener('click', () => {
+    if (selected.length === 0) return;
+    startPull(selected);
   });
 
   // The service worker pushes progress while the popup is open.

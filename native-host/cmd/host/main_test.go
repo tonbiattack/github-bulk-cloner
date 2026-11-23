@@ -50,12 +50,18 @@ func decodeAll(t *testing.T, raw []byte) []map[string]any {
 
 func runServe(t *testing.T, requests ...any) []map[string]any {
 	t.Helper()
+	return runServeWithContext(t, context.Background(), requests...)
+}
+
+// runServeWithContext runs the request loop with a caller-supplied context.
+func runServeWithContext(t *testing.T, ctx context.Context, requests ...any) []map[string]any {
+	t.Helper()
 	var stdin bytes.Buffer
 	for _, req := range requests {
 		stdin.Write(encode(t, req))
 	}
 	var stdout, stderr bytes.Buffer
-	if err := serve(context.Background(), &stdin, &stdout, &stderr); err != nil {
+	if err := serve(ctx, &stdin, &stdout, &stderr); err != nil {
 		t.Fatalf("serve: %v (stderr: %s)", err, stderr.String())
 	}
 	return decodeAll(t, stdout.Bytes())

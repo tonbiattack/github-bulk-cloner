@@ -43,6 +43,15 @@
   </section>
 
   <section class="section">
+    <span class="label">まとめて git pull</span>
+    <div class="row">
+      <button id="pull-all" type="button" class="secondary grow">保存先をすべて pull</button>
+      <button id="pull-selected" type="button" class="secondary" disabled>選択分を pull</button>
+    </div>
+    <p id="pull-hint" class="hint">保存先フォルダ配下の Git リポジトリを fast-forward のみで更新します。</p>
+  </section>
+
+  <section class="section">
     <div class="row row-between">
       <span class="label">実行結果</span>
       <span id="progress" class="count"></span>

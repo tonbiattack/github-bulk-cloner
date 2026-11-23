@@ -16,6 +16,7 @@ const RUN_STATE_KEY = 'lastRun';
 /** In-memory state for the active run. */
 let runState = {
   status: 'idle', // idle | running | done | error
+  kind: 'clone', // clone | pull
   requestId: null,
   total: 0,
   completed: 0,
@@ -92,6 +93,7 @@ async function saveSettings(settings) {
 function snapshot() {
   return {
     status: runState.status,
+    kind: runState.kind,
     requestId: runState.requestId,
     total: runState.total,
     completed: runState.completed,
@@ -106,9 +108,10 @@ function broadcast() {
   chrome.runtime.sendMessage({ type: 'gbc:runUpdate', state: snapshot() }).catch(() => {});
 }
 
-function resetRun(total) {
+function resetRun(total, kind) {
   runState = {
     status: 'running',
+    kind: kind || 'clone',
     requestId: createRequestId(),
     total,
     completed: 0,
@@ -153,6 +156,8 @@ function describeHostError(code, message) {
       return 'Git が見つかりません。Git for Windows をインストールし、PATH に追加してください。';
     case 'too_many_repositories':
       return '一度に選択できるのは ' + MAX_REPOSITORIES + ' 件までです。';
+    case 'nothing_to_pull':
+      return '保存先に Git リポジトリが見つかりませんでした。先に clone してください。';
     case 'invalid_request':
       return 'リクエストが不正です。' + (message ? ' (' + message + ')' : '');
     case 'cancelled':
@@ -174,20 +179,28 @@ function describeConnectError(error) {
   return 'ネイティブホストに接続できません: ' + text;
 }
 
-// -------------------------------------------------------------- clone start
+// -------------------------------------------------------------- run start
 
-async function startClone(repositories) {
+/**
+ * Starts a native host run.
+ *
+ * @param {'clone'|'pull'} kind
+ * @param {string[]} repositories owner/repo specs. For pull, an empty array
+ *   means "every repository under the root".
+ */
+async function startRun(kind, repositories) {
   if (runState.status === 'running') {
     throw new Error('すでに実行中です');
   }
 
+  const isPull = kind === 'pull';
   const specs = Array.from(new Set(
     (Array.isArray(repositories) ? repositories : [])
       .filter((spec) => typeof spec === 'string' && spec.trim() !== '')
       .map((spec) => spec.trim())
   ));
 
-  if (specs.length === 0) {
+  if (!isPull && specs.length === 0) {
     throw new Error('リポジトリが選択されていません');
   }
   if (specs.length > MAX_REPOSITORIES) {
@@ -195,7 +208,7 @@ async function startClone(repositories) {
   }
 
   const { root } = await getSettings();
-  resetRun(specs.length);
+  resetRun(isPull ? 0 : specs.length, kind);
   await persistRunState();
   broadcast();
 
@@ -223,12 +236,16 @@ async function startClone(repositories) {
           existingGitRepo: message.existingGitRepo
         });
         runState.completed = runState.results.length;
+        // A pull discovers its own targets, so the total grows as results
+        // arrive until the done frame fixes it.
+        if (runState.kind === 'pull') runState.total = runState.results.length;
         broadcast();
         break;
 
       case 'done':
-        runState.summary = message.summary || summarize(runState.results);
-        runState.completed = runState.total;
+        runState.summary = message.summary || summarize(runState.results, runState.kind);
+        runState.total = runState.results.length;
+        runState.completed = runState.results.length;
         finishRun('done', null);
         break;
 
@@ -251,7 +268,7 @@ async function startClone(repositories) {
 
     // The host exits after `done`; a disconnect before that is a failure.
     if (runState.completed >= runState.total && runState.total > 0) {
-      runState.summary = runState.summary || summarize(runState.results);
+      runState.summary = runState.summary || summarize(runState.results, runState.kind);
       finishRun('done', null);
       return;
     }
@@ -262,7 +279,7 @@ async function startClone(repositories) {
 
   try {
     connected.postMessage({
-      type: 'clone',
+      type: kind,
       requestId: runState.requestId,
       root,
       repositories: specs
@@ -274,7 +291,27 @@ async function startClone(repositories) {
   return snapshot();
 }
 
-function summarize(results) {
+/** Starts a clone run. */
+function startClone(repositories) {
+  return startRun('clone', repositories);
+}
+
+/** Starts a pull run. An empty list means every repository under the root. */
+function startPull(repositories) {
+  return startRun('pull', repositories);
+}
+
+function summarize(results, kind) {
+  if (kind === 'pull') {
+    const summary = { updated: 0, upToDate: 0, failed: 0 };
+    for (const result of results) {
+      if (result.status === 'updated') summary.updated++;
+      else if (result.status === 'up-to-date') summary.upToDate++;
+      else summary.failed++;
+    }
+    return summary;
+  }
+
   const summary = { success: 0, skipped: 0, failed: 0 };
   for (const result of results) {
     if (result.status === 'success') summary.success++;
@@ -348,6 +385,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'gbc:startClone':
       startClone(message.repositories)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: String(error && error.message ? error.message : error) }));
+      return true;
+
+    case 'gbc:startPull':
+      startPull(message.repositories)
         .then(sendResponse)
         .catch((error) => sendResponse({ error: String(error && error.message ? error.message : error) }));
       return true;

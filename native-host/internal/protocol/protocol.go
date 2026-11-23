@@ -20,6 +20,7 @@ const MaxMessageSize = 1 << 20
 // Message types accepted from the extension.
 const (
 	TypeClone = "clone"
+	TypePull  = "pull"
 	TypePing  = "ping"
 )
 
@@ -38,7 +39,18 @@ const (
 	StatusFailed  = "failed"
 )
 
+// Pull statuses reported per repository.
+const (
+	// StatusUpdated means the pull brought in new commits.
+	StatusUpdated = "updated"
+	// StatusUpToDate means the repository was already current.
+	StatusUpToDate = "up-to-date"
+)
+
 // Request is an inbound message. Only the fields relevant to Type are used.
+//
+// For TypePull, Repositories may be empty, in which case the host discovers
+// every Git repository under Root and pulls each one.
 type Request struct {
 	Type         string   `json:"type"`
 	RequestID    string   `json:"requestId"`
@@ -58,11 +70,14 @@ type Result struct {
 	ExistingGitRepo *bool  `json:"existingGitRepo,omitempty"`
 }
 
-// Summary counts the outcomes of a finished request.
+// Summary counts the outcomes of a finished request. Clone runs use Success,
+// Skipped, and Failed; pull runs use Updated, UpToDate, and Failed.
 type Summary struct {
-	Success int `json:"success"`
-	Skipped int `json:"skipped"`
-	Failed  int `json:"failed"`
+	Success  int `json:"success"`
+	Skipped  int `json:"skipped"`
+	Failed   int `json:"failed"`
+	Updated  int `json:"updated,omitempty"`
+	UpToDate int `json:"upToDate,omitempty"`
 }
 
 // Done terminates a request.
