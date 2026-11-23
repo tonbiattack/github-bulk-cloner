@@ -50,7 +50,8 @@ func TestCloneRejectsInvalidSpecBeforeRunning(t *testing.T) {
 func TestCloneSkipsExistingDirectory(t *testing.T) {
 	runner, root := newRunner(t)
 
-	target := filepath.Join(root, "owner", "repo")
+	// The layout is flat: <root>/<repo>.
+	target := filepath.Join(root, "repo")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestCloneSkipsExistingDirectory(t *testing.T) {
 func TestCloneSkipsExistingGitRepo(t *testing.T) {
 	runner, root := newRunner(t)
 
-	target := filepath.Join(root, "owner", "repo")
+	target := filepath.Join(root, "repo")
 	if err := os.MkdirAll(filepath.Join(target, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +111,12 @@ func TestTargetPathDoesNotTouchDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TargetPath: %v", err)
 	}
-	want := filepath.Join(root, "owner", "repo")
+	// The layout is flat, so the owner is not part of the path.
+	want := filepath.Join(root, "repo")
 	if got != want {
 		t.Fatalf("TargetPath = %q, want %q", got, want)
 	}
-	if _, err := os.Stat(filepath.Join(root, "owner")); !os.IsNotExist(err) {
+	if _, err := os.Stat(got); !os.IsNotExist(err) {
 		t.Fatal("TargetPath must not create directories")
 	}
 }

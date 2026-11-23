@@ -146,10 +146,6 @@ button.secondary:not(:disabled):hover {
   filter: brightness(0.96);
 }
 
-button.grow {
-  flex: 1 1 auto;
-}
-
 .hint {
   margin: 6px 0 0;
   color: var(--muted);

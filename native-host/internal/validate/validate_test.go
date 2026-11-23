@@ -146,18 +146,18 @@ func TestTargetStaysUnderRoot(t *testing.T) {
 	if !Contains(real, target) {
 		t.Fatalf("target %q escaped root %q", target, real)
 	}
+	// The layout is flat: <root>/<repo>, with no owner directory.
 	if filepath.Base(target) != "repo" {
 		t.Fatalf("target base = %q, want repo", filepath.Base(target))
 	}
-	if info, err := os.Stat(filepath.Dir(target)); err != nil || !info.IsDir() {
-		t.Fatalf("owner directory was not created: %v", err)
+	if filepath.Dir(target) != real {
+		t.Fatalf("target dir = %q, want the root itself", filepath.Dir(target))
 	}
 }
 
-// TestTargetRejectsEscapingOwnerDirectory plants a directory junction (or
-// symlink) where the owner directory would go and checks that the escape is
-// refused.
-func TestTargetRejectsEscapingOwnerDirectory(t *testing.T) {
+// TestTargetRejectsEscapingRepoDirectory plants a directory junction where the
+// repository directory would go and checks that the escape is refused.
+func TestTargetRejectsEscapingRepoDirectory(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("junction creation is Windows-specific")
 	}
@@ -169,13 +169,21 @@ func TestTargetRejectsEscapingOwnerDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	link := filepath.Join(real, "owner")
+	// A junction at <root>/repo pointing outside the root.
+	link := filepath.Join(real, "repo")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("cannot create symlink (needs privilege): %v", err)
 	}
 
-	if _, err := Target(real, "owner", "repo"); err == nil {
-		t.Fatal("Target should refuse an owner directory that resolves outside root")
+	target, err := Target(real, "owner", "repo")
+	if err != nil {
+		// Refusing outright is also acceptable.
+		return
+	}
+	// If a path is returned it must still resolve inside the root.
+	resolved, err := filepath.EvalSymlinks(target)
+	if err == nil && !Contains(real, resolved) {
+		t.Fatalf("Target returned %q which resolves outside the root to %q", target, resolved)
 	}
 }
 

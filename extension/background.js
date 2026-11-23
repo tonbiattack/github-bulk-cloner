@@ -104,8 +104,20 @@ function snapshot() {
 }
 
 function broadcast() {
+  const message = { type: 'gbc:runUpdate', state: snapshot() };
+
   // A closed popup makes this reject; that is expected.
-  chrome.runtime.sendMessage({ type: 'gbc:runUpdate', state: snapshot() }).catch(() => {});
+  chrome.runtime.sendMessage(message).catch(() => {});
+
+  // Content scripts are not reached by runtime.sendMessage, so notify the
+  // GitHub tabs separately. This is what updates the per-row pull badges.
+  chrome.tabs.query({ url: 'https://github.com/*' }, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
+    for (const tab of tabs) {
+      if (typeof tab.id !== 'number') continue;
+      chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+    }
+  });
 }
 
 function resetRun(total, kind) {
@@ -180,6 +192,70 @@ function describeConnectError(error) {
 }
 
 // -------------------------------------------------------------- run start
+
+/**
+ * Repositories waiting for a pull, in the order they were requested.
+ *
+ * Checking several boxes in quick succession must not fail with "already
+ * running", so pull requests are queued and drained one at a time.
+ */
+const pullQueue = [];
+let drainingQueue = false;
+/** Set when a "pull everything under the root" request is queued. */
+let pullAllQueued = false;
+
+/** Queues a pull for one or more repositories, or for the whole root. */
+function enqueuePull(repositories) {
+  const specs = (Array.isArray(repositories) ? repositories : [])
+    .filter((spec) => typeof spec === 'string' && spec.trim() !== '')
+    .map((spec) => spec.trim());
+
+  if (specs.length === 0) {
+    // An empty list means "every repository under the root".
+    pullAllQueued = true;
+  } else {
+    for (const spec of specs) {
+      if (!pullQueue.includes(spec)) pullQueue.push(spec);
+    }
+  }
+  drainPullQueue();
+}
+
+/** Runs queued pulls one at a time until the queue is empty. */
+async function drainPullQueue() {
+  if (drainingQueue) return;
+  drainingQueue = true;
+
+  try {
+    while (pullAllQueued || pullQueue.length > 0) {
+      if (runState.status === 'running') {
+        // Wait for the active run to finish before starting the next one.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+
+      let specs;
+      if (pullAllQueued) {
+        pullAllQueued = false;
+        specs = [];
+      } else {
+        specs = [pullQueue.shift()];
+      }
+
+      try {
+        await startRun('pull', specs);
+      } catch {
+        // A failed start is reported through the run state; keep draining.
+      }
+      // Wait for this run to settle before starting the next.
+      while (runState.status === 'running') {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  } finally {
+    drainingQueue = false;
+  }
+}
 
 /**
  * Starts a native host run.
@@ -390,10 +466,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
 
     case 'gbc:startPull':
-      startPull(message.repositories)
-        .then(sendResponse)
-        .catch((error) => sendResponse({ error: String(error && error.message ? error.message : error) }));
-      return true;
+      // Queue the request so rapid checkbox clicks are serialised rather than
+      // rejected with "already running".
+      enqueuePull(message.repositories);
+      sendResponse({ status: 'queued', kind: 'pull' });
+      return false;
 
     case 'gbc:getRunState':
       restoreRunState()

@@ -22,6 +22,48 @@
   outline-offset: 2px;
 }
 
+/* Per-row pull status shown next to the checkbox. */
+.gbc-row-status {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font: 600 10px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.gbc-row-status[data-state="pulling"] {
+  color: #59636e;
+  background: rgba(89, 99, 110, 0.14);
+}
+
+.gbc-row-status[data-state="updated"] {
+  color: #1a7f37;
+  background: rgba(26, 127, 55, 0.14);
+}
+
+.gbc-row-status[data-state="up-to-date"] {
+  color: #59636e;
+  background: rgba(89, 99, 110, 0.14);
+}
+
+.gbc-row-status[data-state="failed"] {
+  color: #cf222e;
+  background: rgba(207, 34, 46, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  .gbc-row-status[data-state="updated"] {
+    color: #3fb950;
+    background: rgba(63, 185, 80, 0.16);
+  }
+
+  .gbc-row-status[data-state="failed"] {
+    color: #f85149;
+    background: rgba(248, 81, 73, 0.16);
+  }
+}
+
 /* Highlight the row of a selected repository. */
 .gbc-selected {
   background-color: rgba(31, 136, 61, 0.08);

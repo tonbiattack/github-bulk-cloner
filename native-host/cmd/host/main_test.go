@@ -159,7 +159,7 @@ func TestServeRejectsRelativeRoot(t *testing.T) {
 // touching the network: the only repository already exists on disk.
 func TestServeSkipsExistingAndReportsDone(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "owner", "repo"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +194,7 @@ func TestServeSkipsExistingAndReportsDone(t *testing.T) {
 // TestServeDeduplicatesRepositories checks that a repeated spec is cloned once.
 func TestServeDeduplicatesRepositories(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "owner", "repo"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -220,7 +220,7 @@ func TestServeDeduplicatesRepositories(t *testing.T) {
 // remaining repositories.
 func TestServeKeepsGoingAfterFailure(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "owner", "good"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "good"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

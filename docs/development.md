@@ -156,12 +156,25 @@ node extension/test/cdp-pull-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-pull-sc
 
 `cdp-pull-e2e.js` が確認する内容:
 
-- 「すべて pull」が保存先配下のリポジトリを検出する
+- ホストの自動検出が保存先配下のリポジトリを見つける（`repositories` が空の経路）
 - 最新のリポジトリが `up-to-date` になる
 - 新しいコミットがあるリポジトリが `updated` になり、実際にファイルが更新される
 - 分岐したリポジトリが `failed` になり、**HEAD とローカルファイルが変わらない**
 - 名前指定の pull がそのリポジトリだけを対象にする
 - リポジトリが無い保存先で実行可能なエラーを返す
+
+チェック時の自動 pull は別スクリプトで確認します。
+
+```powershell
+$env:CDP_PORT = '9339'
+node extension/test/cdp-autopull-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-autopull-root')
+```
+
+`cdp-autopull-e2e.js` が確認する内容:
+
+- チェックを付けたリポジトリだけが pull される
+- 行に状態バッジが出て、最終結果（更新 / 最新 / 失敗）に変わる
+- チェックを外しても pull が走らない
 
 ### ホスト単体
 
@@ -191,7 +204,7 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 ホスト → 拡張（リポジトリ単位）:
 
 ```json
-{"type":"result","requestId":"...","repository":"owner/repo","status":"success","path":"C:\\apps\\owner\\repo","method":"git"}
+{"type":"result","requestId":"...","repository":"owner/repo","status":"success","path":"C:\\apps\\repo","method":"git"}
 ```
 
 clone の `status` は `success` / `skipped` / `failed`。`skipped` のときは `existingGitRepo` が付きます。
@@ -216,9 +229,16 @@ pull の summary は `{"updated":1,"upToDate":2,"failed":0}` になります。
 
 `ping` には `{"type":"pong","version":"0.1.0"}` が返ります。
 
-## 一括 git pull
+## git pull
 
-ポップアップの「保存先をすべて pull」は、保存先フォルダ配下を走査して Git リポジトリを探し、まとめて更新します。GitHub のページを開いていなくても動きます。
+チェックボックスにチェックを付けると、そのリポジトリを**その場で pull** します。GitHub のページを開いたまま更新できます。
+
+### チェック時の自動 pull
+
+- チェックを付けた瞬間に、そのリポジトリだけを pull する
+- 行のチェックボックス横に状態を表示する（`pull 中…` / `更新` / `最新` / 失敗理由）
+- **チェックを外しても pull はしない**。選択が外れるだけ
+- 連続でチェックしても「すでに実行中」にならないよう、service worker 側でキューに積んで 1 件ずつ処理する
 
 ### 安全側に倒した挙動
 
@@ -228,18 +248,20 @@ pull の summary は `{"updated":1,"upToDate":2,"failed":0}` になります。
 | 新しいコミットあり | `updated`。fast-forward で取り込む |
 | ローカルと分岐（diverged） | `failed`。マージコミットを作らず、履歴を書き換えない |
 | 未コミットの変更あり | `failed`。stash も破棄もしない |
-| 追跡ブランチ未設定 | `failed`。`git pull` は実行しない |
+| 追跡ブランチが未設定 | `failed`。`git pull` は実行しない |
 | リポジトリでないディレクトリ | `failed` |
 
 `git pull --ff-only --no-rebase` を使うため、**マージ・リベース・stash・reset は一切行いません**。ローカルの作業が失われることはありません。
 
-### 検出のルール
+### ホスト側の自動検出
 
-- `<root>/<owner>/<repo>` の形なら `owner/repo` として報告する
-- それ以外の深さでも Git リポジトリなら、root からの相対パスで報告する
+ホストは `pull` 要求で `repositories` が空のとき、保存先配下の Git リポジトリを自動検出して pull します。現在の拡張 UI は常にリポジトリを明示するため、この経路は使われていませんが、ホスト単体の確認用に残しています。
+
+- 保存先直下の `<root>/<repo>` が基本の配置
 - リポジトリの中は再帰しない（ネストした checkout を二重に数えない）
 - `.git` と `node_modules` は走査しない
 - 深さは 4 階層まで、1 回あたり 500 件まで
+- 表示名は origin が GitHub なら `owner/repo`、それ以外はディレクトリ名
 
 ## 制約
 
@@ -247,4 +269,4 @@ pull の summary は `{"updated":1,"upToDate":2,"failed":0}` になります。
 - 1 リクエストあたり最大 200 リポジトリ。
 - 1 リポジトリあたりのタイムアウトは 10 分。
 - 保存先 root は事前に存在している必要がある（ホストは作らない）。
-- フラット保存（`<root>/<repo>`）は未対応。常に `<root>/<owner>/<repo>`。
+- 保存先は `<root>/<repo>` のフラット配置。owner ディレクトリは作らない。

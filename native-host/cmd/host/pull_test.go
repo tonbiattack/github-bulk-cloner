@@ -80,8 +80,8 @@ func initRepoWithUpstream(t *testing.T, dir string) {
 
 func TestServePullDiscoversRepositories(t *testing.T) {
 	root := t.TempDir()
-	initRepoWithUpstream(t, filepath.Join(root, "alpha", "one"))
-	initRepoWithUpstream(t, filepath.Join(root, "beta", "two"))
+	initRepoWithUpstream(t, filepath.Join(root, "one"))
+	initRepoWithUpstream(t, filepath.Join(root, "two"))
 
 	msgs := runServe(t, protocol.Request{
 		Type:      protocol.TypePull,
@@ -101,12 +101,12 @@ func TestServePullDiscoversRepositories(t *testing.T) {
 		}
 		seen[msg["repository"].(string)] = true
 	}
-	for _, want := range []string{"alpha/one", "beta/two"} {
+	// Local fixtures have no GitHub remote, so the label is the directory name.
+	for _, want := range []string{"one", "two"} {
 		if !seen[want] {
 			t.Errorf("missing %q in results: %v", want, seen)
 		}
 	}
-
 	if msgs[2]["type"] != protocol.TypeDone {
 		t.Fatalf("last message type = %v, want done", msgs[2]["type"])
 	}
@@ -155,8 +155,8 @@ func TestServePullRejectsMissingRequestID(t *testing.T) {
 
 func TestServePullNamedRepositories(t *testing.T) {
 	root := t.TempDir()
-	initRepoWithUpstream(t, filepath.Join(root, "alpha", "one"))
-	initRepoWithUpstream(t, filepath.Join(root, "beta", "two"))
+	initRepoWithUpstream(t, filepath.Join(root, "one"))
+	initRepoWithUpstream(t, filepath.Join(root, "two"))
 
 	// Only the named repository should be pulled.
 	msgs := runServe(t, protocol.Request{
@@ -172,14 +172,18 @@ func TestServePullNamedRepositories(t *testing.T) {
 	if msgs[0]["repository"] != "alpha/one" {
 		t.Fatalf("repository = %v, want alpha/one", msgs[0]["repository"])
 	}
+	// The flat layout puts the repository directly under the root.
+	if msgs[0]["path"] != filepath.Join(root, "one") {
+		t.Fatalf("path = %v, want %v", msgs[0]["path"], filepath.Join(root, "one"))
+	}
 }
 
 func TestServePullKeepsGoingAfterFailure(t *testing.T) {
 	root := t.TempDir()
-	initRepoWithUpstream(t, filepath.Join(root, "alpha", "one"))
+	initRepoWithUpstream(t, filepath.Join(root, "one"))
 
 	// A non-repository directory must fail without stopping the run.
-	if err := os.MkdirAll(filepath.Join(root, "beta", "plain"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "plain"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,7 +193,6 @@ func TestServePullKeepsGoingAfterFailure(t *testing.T) {
 		Root:         root,
 		Repositories: []string{"beta/plain", "alpha/one"},
 	})
-
 	var statuses []string
 	for _, msg := range msgs {
 		if msg["type"] == protocol.TypeResult {
@@ -209,7 +212,7 @@ func TestServePullKeepsGoingAfterFailure(t *testing.T) {
 
 func TestServePullSummaryCounts(t *testing.T) {
 	root := t.TempDir()
-	initRepoWithUpstream(t, filepath.Join(root, "alpha", "one"))
+	initRepoWithUpstream(t, filepath.Join(root, "one"))
 
 	msgs := runServe(t, protocol.Request{
 		Type:      protocol.TypePull,
@@ -229,7 +232,7 @@ func TestServePullSummaryCounts(t *testing.T) {
 
 func TestServeStillHandlesClone(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "owner", "repo"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -246,7 +249,7 @@ func TestServeStillHandlesClone(t *testing.T) {
 
 func TestServePullHonoursCancellation(t *testing.T) {
 	root := t.TempDir()
-	initRepoWithUpstream(t, filepath.Join(root, "alpha", "one"))
+	initRepoWithUpstream(t, filepath.Join(root, "one"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

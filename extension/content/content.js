@@ -108,6 +108,12 @@
       applySelectedStyle(candidate.spec, checkbox.checked);
       updateToolbar();
       notifySelectionChanged();
+
+      // Checking a box pulls that repository straight away. Unchecking only
+      // clears the selection; it never touches the working tree.
+      if (checkbox.checked) {
+        requestPull(candidate);
+      }
     });
 
     wrapper.appendChild(checkbox);
@@ -129,6 +135,80 @@
     const entry = entries.get(spec.toLowerCase());
     if (!entry || !entry.row) return;
     entry.row.classList.toggle(SELECTED_CLASS, isSelected);
+  }
+
+  // ------------------------------------------------------------- auto pull
+
+  /** Rows currently waiting on a pull, keyed by lowercased spec. */
+  const pendingPulls = new Map();
+
+  /**
+   * Pulls one repository as soon as its checkbox is checked.
+   *
+   * The service worker owns the native messaging port, so this only sends a
+   * request and reflects the outcome on the row.
+   */
+  function requestPull(candidate) {
+    const key = candidate.spec.toLowerCase();
+    if (pendingPulls.has(key)) return;
+
+    setRowStatus(candidate.spec, 'pulling', 'pull 中…');
+    pendingPulls.set(key, true);
+
+    chrome.runtime.sendMessage({
+      type: 'gbc:startPull',
+      repositories: [candidate.spec]
+    }).then((result) => {
+      pendingPulls.delete(key);
+      if (!result) {
+        setRowStatus(candidate.spec, 'failed', 'pull できませんでした');
+        return;
+      }
+      if (result.error) {
+        setRowStatus(candidate.spec, 'failed', result.error);
+        return;
+      }
+      // The run is asynchronous; the worker reports the outcome separately.
+      setRowStatus(candidate.spec, 'pulling', 'pull 中…');
+    }).catch((error) => {
+      pendingPulls.delete(key);
+      setRowStatus(candidate.spec, 'failed', String(error && error.message ? error.message : error));
+    });
+  }
+
+  /** Shows a short status next to a row's checkbox. */
+  function setRowStatus(spec, state, text) {
+    const entry = entries.get(spec.toLowerCase());
+    if (!entry) return;
+
+    let badge = entry.wrapper.querySelector('.gbc-row-status');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'gbc-row-status';
+      entry.wrapper.appendChild(badge);
+    }
+    badge.dataset.state = state;
+    badge.textContent = text || '';
+    badge.title = text || '';
+  }
+
+  /** Applies a pull result reported by the service worker. */
+  function applyPullResult(result) {
+    if (!result || typeof result.repository !== 'string') return;
+
+    switch (result.status) {
+      case 'updated':
+        setRowStatus(result.repository, 'updated', '更新');
+        break;
+      case 'up-to-date':
+        setRowStatus(result.repository, 'up-to-date', '最新');
+        break;
+      case 'failed':
+        setRowStatus(result.repository, 'failed', result.message || '失敗');
+        break;
+      default:
+        break;
+    }
   }
 
   /** Adds checkboxes for any newly seen candidates. */
@@ -341,6 +421,15 @@
     if (!message || typeof message.type !== 'string') return false;
 
     switch (message.type) {
+      case 'gbc:runUpdate': {
+        // Reflect pull outcomes on the rows as they arrive.
+        const state = message.state;
+        if (state && state.kind === 'pull' && Array.isArray(state.results)) {
+          for (const result of state.results) applyPullResult(result);
+        }
+        return false;
+      }
+
       case 'gbc:getState':
         sendResponse({
           supported: RepoUrl.isSupportedPage(location.href),

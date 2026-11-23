@@ -74,10 +74,14 @@ func pushCommit(t *testing.T, bare, content string) {
 	runGit(t, seed, "push", "origin", "main")
 }
 
-// makeWorkingClone clones the upstream into root/owner/repo.
+// makeWorkingClone clones the upstream into root/<owner>/<repo> when owner is
+// non-empty, or root/<repo> for the flat layout.
 func makeWorkingClone(t *testing.T, bare, root, owner, repo string) string {
 	t.Helper()
-	target := filepath.Join(root, owner, repo)
+	target := filepath.Join(root, repo)
+	if owner != "" {
+		target = filepath.Join(root, owner, repo)
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -218,12 +222,13 @@ func TestPullRejectsPathOutsideRoot(t *testing.T) {
 	}
 }
 
-func TestDiscoverRepositoriesFindsOwnerRepoLayout(t *testing.T) {
+func TestDiscoverRepositoriesFindsFlatLayout(t *testing.T) {
 	bare := makeUpstream(t)
 	runner, root := newPullRunner(t)
 
-	makeWorkingClone(t, bare, root, "alpha", "one")
-	makeWorkingClone(t, bare, root, "beta", "two")
+	// The flat layout is what this tool creates: <root>/<repo>.
+	makeWorkingClone(t, bare, root, "", "one")
+	makeWorkingClone(t, bare, root, "", "two")
 
 	found, err := runner.DiscoverRepositories()
 	if err != nil {
@@ -233,6 +238,7 @@ func TestDiscoverRepositoriesFindsOwnerRepoLayout(t *testing.T) {
 		t.Fatalf("found %d repositories, want 2: %+v", len(found), found)
 	}
 
+	// Local fixtures have no GitHub remote, so the label is the directory name.
 	specs := map[string]bool{}
 	for _, item := range found {
 		specs[item.Spec] = true
@@ -240,10 +246,50 @@ func TestDiscoverRepositoriesFindsOwnerRepoLayout(t *testing.T) {
 			t.Errorf("%s is not a repository", item.Path)
 		}
 	}
-	for _, want := range []string{"alpha/one", "beta/two"} {
+	for _, want := range []string{"one", "two"} {
 		if !specs[want] {
 			t.Errorf("missing %q in %v", want, specs)
 		}
+	}
+}
+
+func TestOwnerFromRemote(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/tonbiattack/zip-scope.git": "tonbiattack",
+		"https://github.com/tonbiattack/zip-scope":     "tonbiattack",
+		"git@github.com:tonbiattack/zip-scope.git":     "tonbiattack",
+		"https://gitlab.com/owner/repo.git":            "",
+		"https://example.com/owner/repo":               "",
+		"":                                             "",
+		"not a url":                                    "",
+	}
+	for remote, want := range cases {
+		if got := ownerFromRemote(remote); got != want {
+			t.Errorf("ownerFromRemote(%q) = %q, want %q", remote, got, want)
+		}
+	}
+}
+
+func TestDiscoverRepositoriesUsesRemoteOwner(t *testing.T) {
+	runner, root := newPullRunner(t)
+
+	// A repository whose origin points at GitHub should be labelled owner/repo.
+	dir := filepath.Join(root, "zip-scope")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/tonbiattack/zip-scope.git")
+
+	found, err := runner.DiscoverRepositories()
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("found %d repositories, want 1", len(found))
+	}
+	if found[0].Spec != "tonbiattack/zip-scope" {
+		t.Fatalf("spec = %q, want tonbiattack/zip-scope", found[0].Spec)
 	}
 }
 

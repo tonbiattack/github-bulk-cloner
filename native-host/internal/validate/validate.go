@@ -144,22 +144,14 @@ func Contains(root, target string) bool {
 	return !filepath.IsAbs(rel)
 }
 
-// Target returns the clone destination for owner/name, creating the owner
-// directory when needed. It fails if the owner directory resolves to a
-// location outside root (for example a junction planted by another process).
+// Target returns the clone destination for owner/name.
+//
+// The layout is flat: <root>/<name>. This tool is used for the user's own
+// repositories, so the owner segment only adds a directory level. The owner is
+// still validated, because it identifies which repository to fetch.
 func Target(rootReal, owner, name string) (string, error) {
-	ownerDir := filepath.Join(rootReal, owner)
-	if err := os.MkdirAll(ownerDir, 0o755); err != nil {
-		return "", fmt.Errorf("cannot create owner directory: %w", err)
-	}
-	ownerReal, err := filepath.EvalSymlinks(ownerDir)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve owner directory: %w", err)
-	}
-	if !Contains(rootReal, ownerReal) {
-		return "", fmt.Errorf("owner directory %q resolves outside the clone root", ownerDir)
-	}
-	target := filepath.Join(ownerReal, name)
+	_ = owner // validated by RepoSpec; not part of the path
+	target := filepath.Join(rootReal, name)
 	if !Contains(rootReal, target) {
 		return "", fmt.Errorf("clone target %q resolves outside the clone root", target)
 	}

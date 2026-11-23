@@ -331,7 +331,7 @@ func (r *Runner) TargetPath(spec string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(r.Root, owner, name), nil
+	return validate.Target(r.Root, owner, name)
 }
 
 // ---------------------------------------------------------------- pull
@@ -405,22 +405,71 @@ type Discovered struct {
 }
 
 // describeRepo builds a Discovered for an existing working tree.
+//
+// The flat layout <root>/<repo> is what this tool creates, so the repository
+// name is used as the label. The remote URL supplies the owner when it points
+// at GitHub, which keeps the label in owner/repo form for display.
 func (r *Runner) describeRepo(path string) Discovered {
 	rel, err := filepath.Rel(r.Root, path)
 	if err == nil {
 		parts := strings.Split(filepath.ToSlash(rel), "/")
-		// <owner>/<repo> is the layout this tool creates.
+		// <owner>/<repo> from an older layout still resolves to owner/repo.
 		if len(parts) == 2 {
 			if _, _, specErr := validate.RepoSpec(parts[0] + "/" + parts[1]); specErr == nil {
 				return Discovered{Spec: parts[0] + "/" + parts[1], Path: path}
 			}
 		}
 	}
-	label := rel
-	if err != nil || label == "" {
-		label = filepath.Base(path)
+
+	name := filepath.Base(path)
+	if owner := r.remoteOwner(path); owner != "" {
+		return Discovered{Spec: owner + "/" + name, Path: path}
 	}
-	return Discovered{Spec: filepath.ToSlash(label), Path: path}
+	return Discovered{Spec: name, Path: path}
+}
+
+// remoteOwner extracts the owner from the origin remote when it is a GitHub
+// URL. It returns "" when the remote is absent or not on GitHub.
+func (r *Runner) remoteOwner(path string) string {
+	gitPath, err := r.git()
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, gitPath, "remote", "get-url", "origin")
+	cmd.Dir = path
+	cmd.Env = toolEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return ownerFromRemote(strings.TrimSpace(string(out)))
+}
+
+// ownerFromRemote parses the owner out of a GitHub remote URL.
+func ownerFromRemote(remote string) string {
+	remote = strings.TrimSuffix(remote, ".git")
+
+	// https://github.com/<owner>/<repo>
+	if idx := strings.Index(remote, "github.com/"); idx >= 0 {
+		rest := remote[idx+len("github.com/"):]
+		parts := strings.Split(rest, "/")
+		if len(parts) >= 2 && parts[0] != "" {
+			return parts[0]
+		}
+		return ""
+	}
+	// git@github.com:<owner>/<repo>
+	if idx := strings.Index(remote, "github.com:"); idx >= 0 {
+		rest := remote[idx+len("github.com:"):]
+		parts := strings.Split(rest, "/")
+		if len(parts) >= 2 && parts[0] != "" {
+			return parts[0]
+		}
+	}
+	return ""
 }
 
 // Pull updates one existing working tree with a fast-forward-only pull.

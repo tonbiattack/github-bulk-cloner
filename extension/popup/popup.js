@@ -17,9 +17,6 @@
     clear: document.getElementById('clear'),
     clone: document.getElementById('clone'),
     cloneHint: document.getElementById('clone-hint'),
-    pullAll: document.getElementById('pull-all'),
-    pullSelected: document.getElementById('pull-selected'),
-    pullHint: document.getElementById('pull-hint'),
     progress: document.getElementById('progress'),
     summary: document.getElementById('summary'),
     resultList: document.getElementById('result-list'),
@@ -96,22 +93,14 @@
     const running = runState.status === 'running';
     elements.clone.disabled = running || selected.length === 0 || !supported;
 
-    // Pull works from the saved root, so it does not need a GitHub page.
-    elements.pullAll.disabled = running;
-    elements.pullSelected.disabled = running || selected.length === 0;
-
     if (running) {
       setHint(elements.cloneHint, '実行中です…', false);
-      setHint(elements.pullHint, '実行中です…', false);
     } else if (!supported) {
       setHint(elements.cloneHint, 'GitHub のリポジトリ一覧ページを開いてください。', false);
-      setHint(elements.pullHint, '保存先フォルダ配下の Git リポジトリを fast-forward のみで更新します。', false);
     } else if (selected.length === 0) {
       setHint(elements.cloneHint, 'リポジトリを選択してください。', false);
-      setHint(elements.pullHint, '保存先フォルダ配下の Git リポジトリを fast-forward のみで更新します。', false);
     } else {
       setHint(elements.cloneHint, selected.length + ' 件を clone します。', false);
-      setHint(elements.pullHint, selected.length + ' 件を pull します。', false);
     }
   }
 
@@ -329,37 +318,8 @@
     }
   });
 
-  /** Starts a pull run and renders the outcome. */
-  async function startPull(repositories) {
-    const result = await sendToWorker({ type: 'gbc:startPull', repositories });
-    if (result && result.error) {
-      runState = {
-        status: 'error',
-        kind: 'pull',
-        total: 0,
-        completed: 0,
-        results: [],
-        summary: null,
-        error: result.error
-      };
-      renderRun();
-      return;
-    }
-    if (result) {
-      runState = result;
-      renderRun();
-    }
-  }
-
-  elements.pullAll.addEventListener('click', () => {
-    // An empty list tells the host to discover every repository under the root.
-    startPull([]);
-  });
-
-  elements.pullSelected.addEventListener('click', () => {
-    if (selected.length === 0) return;
-    startPull(selected);
-  });
+  // Pulls are started by the content script when a checkbox is checked, so the
+  // popup only displays their progress and results.
 
   // The service worker pushes progress while the popup is open.
   chrome.runtime.onMessage.addListener((message) => {

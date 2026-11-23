@@ -1,9 +1,9 @@
 # github-bulk-cloner
 
-GitHub のリポジトリ一覧ページ上で対象を選び、Windows PC の指定フォルダに一括 `git clone` する Chrome 拡張 + Go Native Messaging ホスト。clone 済みリポジトリの一括 `git pull` にも対応。
+GitHub のリポジトリ一覧ページ上で対象を選び、Windows PC の指定フォルダに一括 `git clone` する Chrome 拡張 + Go Native Messaging ホスト。チェックを付けたリポジトリはその場で `git pull` できる。
 
 ## 目的
-GitHub の Web ページからリポジトリ URL を一件ずつコピーして手動で clone する手間をなくす。普段は GitHub 上でチェックを付けて「Clone selected」を押すだけ。clone 済みのリポジトリは、ポップアップからまとめて `git pull` できる。
+GitHub の Web ページからリポジトリ URL を一件ずつコピーして手動で clone する手間をなくす。普段は GitHub 上でチェックを付けて「Clone selected」を押すだけ。clone 済みのリポジトリは、チェックを付けるだけで最新になる。
 
 ## MVP ユーザーフロー
 1. Windows に Go ネイティブホストをインストール・登録（初回のみ）。Git と、Private リポジトリには認証済み `gh` CLI を利用する。
@@ -12,17 +12,17 @@ GitHub の Web ページからリポジトリ URL を一件ずつコピーして
 4. クローン先のルートディレクトリを指定（既定値 `C:\apps`、変更値を保存）。
 5. 「Clone selected」を押すと、拡張が Native Messaging を通じて Go ホストに `owner/repo` の一覧を送る。
 6. Go ホストが順番にクローンし、成功・失敗・既存の各結果を返す。拡張で進捗と終了結果を表示する。
-7. clone 済みのリポジトリは、ポップアップの「保存先をすべて pull」でまとめて更新できる。GitHub のページを開く必要はない。
+7. 一覧ページでチェックを付けると、そのリポジトリがその場で `git pull` される。
 
 ## 機能要件
 - リポジトリ URL は `https://github.com/<owner>/<repo>` の形式だけを採用。リンク末尾の `.git`、クエリや末尾スラッシュを正規化し、重複排除する。
 - `github.com/topics/*`、GitHub の機能ページ、リポジトリ内の `issues` や `tree` へのリンクをリポジトリ候補として誤検知しない。GitHub の対応画面では既知の DOM コンテナ内のリポジトリリンクを優先して抽出する。
 - 個別選択・全選択・全解除。候補ゼロ件ではクローン操作不可。
-- 同名リポジトリの衝突を回避できるよう、保存先は既定で `<root>/<owner>/<repo>` とする（例: `C:\apps\tonbiattack\zip-scope`）。将来フラット保存を設定で追加可能。
+- 保存先は既定で `<root>/<repo>` のフラット配置とする（例: `C:\apps\zip-scope`）。自分のリポジトリだけを扱う前提のため、owner ディレクトリは作らない。
 - 既存ディレクトリには上書き・削除・自動 pull をしない。対象が既存なら skip。既存が Git リポジトリかどうかを結果に示す。
 - Public は `git clone`、Private は認証済みの `gh repo clone` で対応。資格情報やトークンを拡張から送らない。
 - 処理結果は各リポジトリについて `success | skipped | failed`、保存先、短いエラーメッセージで表示。個別失敗しても残りを続ける。
-- 一括 `git pull` は保存先配下の Git リポジトリを自動検出して実行する。`--ff-only` のみを使い、マージ・リベース・stash・破棄はしない。結果は `updated | up-to-date | failed` で示す。
+- チェックを付けたリポジトリは即座に `git pull` する。行に状態（更新 / 最新 / 失敗）を表示する。チェックを外しても pull はしない。`--ff-only` のみを使い、マージ・リベース・stash・破棄はしない。
 - 対応 OS はまず Windows。Chrome Manifest V3 を使用。
 
 ## アーキテクチャ
@@ -34,7 +34,7 @@ GitHub Web ページ
        └─ service worker: chrome.runtime.connectNative
             └─ Go Native Messaging Host (Windows)
                  └─ git / gh コマンドを固定引数で実行
-                      └─ C:\apps\<owner>\<repo>
+                      └─ C:\apps\<repo>
 ```
 
 ### メッセージ例
@@ -84,11 +84,11 @@ docs/               # 開発・導入・テスト手順
 
 ## 完了条件（MVP）
 - GitHub のプロフィール上で複数リポジトリを選択できる。
-- 実行ボタンで `C:\apps\<owner>\<repo>` に実際に clone される。
+- 実行ボタンで `C:\apps\<repo>` に実際に clone される。
 - 未認証 Private / 既存ディレクトリ / 不正 URL で安全に失敗またはスキップする。
 - 拡張をリロードしても保存先設定が残る。
 - Windows で Native Host の登録・解除と Chrome 拡張の手動導入手順が再現できる。
-- 保存先配下のリポジトリをまとめて `git pull` でき、分岐や未コミット変更を壊さない。
+- チェックを付けたリポジトリがその場で `git pull` され、分岐や未コミット変更を壊さない。
 
 ## 開発順序
 Issue を参照。初回はローカル動作・手動インストールを優先し、Chrome Web Store 公開や自動アップデートは後続対応とする。

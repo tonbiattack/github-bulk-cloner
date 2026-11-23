@@ -114,9 +114,10 @@ function makeRepo(base, owner, repo) {
   return { bare, seed };
 }
 
-function cloneInto(bare, root, owner, repo) {
-  const target = path.join(root, owner, repo);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
+function cloneInto(bare, root, repo) {
+  // The flat layout is what the host creates: <root>/<repo>.
+  const target = path.join(root, repo);
+  fs.mkdirSync(target, { recursive: true });
   git(root, 'clone', bare, target);
   return target;
 }
@@ -138,9 +139,9 @@ async function main() {
   const beta = makeRepo(SCRATCH, 'beta', 'two');
   const gamma = makeRepo(SCRATCH, 'gamma', 'three');
 
-  cloneInto(alpha.bare, root, 'alpha', 'one');
-  const betaPath = cloneInto(beta.bare, root, 'beta', 'two');
-  const gammaPath = cloneInto(gamma.bare, root, 'gamma', 'three');
+  cloneInto(alpha.bare, root, 'one');
+  const betaPath = cloneInto(beta.bare, root, 'two');
+  const gammaPath = cloneInto(gamma.bare, root, 'three');
 
   // beta gets a new upstream commit; gamma diverges locally.
   pushTo(beta.seed, 'two\n');
@@ -150,7 +151,7 @@ async function main() {
   const gammaHead = git(gammaPath, 'rev-parse', 'HEAD');
   pushTo(gamma.seed, 'upstream\n');
 
-  check('fixtures created', fs.existsSync(path.join(root, 'alpha', 'one', '.git')));
+  check('fixtures created', fs.existsSync(path.join(root, 'one', '.git')));
 
   // ------------------------------------------------------- extension context
   const popupUrl = `chrome-extension://${EXTENSION_ID}/popup/popup.html`;
@@ -188,16 +189,16 @@ async function main() {
   for (const result of state.results) byRepo[result.repository] = result;
 
   check('up-to-date repository reported as such',
-    byRepo['alpha/one'] && byRepo['alpha/one'].status === 'up-to-date',
-    JSON.stringify(byRepo['alpha/one'] && byRepo['alpha/one'].status));
+    byRepo['one'] && byRepo['one'].status === 'up-to-date',
+    JSON.stringify(byRepo['one'] && byRepo['one'].status));
 
   check('repository with new commits reported updated',
-    byRepo['beta/two'] && byRepo['beta/two'].status === 'updated',
-    JSON.stringify(byRepo['beta/two'] && byRepo['beta/two'].status));
+    byRepo['two'] && byRepo['two'].status === 'updated',
+    JSON.stringify(byRepo['two'] && byRepo['two'].status));
 
   check('diverged repository reported failed',
-    byRepo['gamma/three'] && byRepo['gamma/three'].status === 'failed',
-    JSON.stringify(byRepo['gamma/three'] && byRepo['gamma/three'].status));
+    byRepo['three'] && byRepo['three'].status === 'failed',
+    JSON.stringify(byRepo['three'] && byRepo['three'].status));
 
   // ------------------------------------------------- verify on-disk effects
   const betaContent = fs.readFileSync(path.join(betaPath, 'file.txt'), 'utf8').replace(/\r\n/g, '\n');
@@ -211,7 +212,7 @@ async function main() {
 
   // --------------------------------------------------- named pull subset
   const named = await evaluate(client,
-    'chrome.runtime.sendMessage({type:"gbc:startPull",repositories:["alpha/one"]})');
+    'chrome.runtime.sendMessage({type:"gbc:startPull",repositories:["one"]})');
   check('named pull accepted', Boolean(named && named.status));
 
   let namedState = null;
@@ -222,7 +223,7 @@ async function main() {
   }
   check('named pull only touched the named repository',
     namedState && namedState.results.length === 1 &&
-    namedState.results[0].repository === 'alpha/one',
+    namedState.results[0].repository === 'one',
     JSON.stringify(namedState && namedState.results.map((r) => r.repository)));
 
   // ------------------------------------------------------ nothing to pull
