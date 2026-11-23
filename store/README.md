@@ -8,7 +8,7 @@
 store/
   screenshots/
     01-repository-list.png     1280x800  一覧にチェックボックスが出ている状態
-    02-clone-in-progress.png   1280x800  チェック後に clone が走った状態
+    02-clone-complete.png   1280x800  チェック後に clone が走った状態
     03-popup-results.png       1280x800  ポップアップと実行結果
   promo/
     small-440x280.png          440x280   小さいプロモーションタイル
@@ -45,13 +45,16 @@ node tools/capture-store-assets.js <32文字> $cloneRoot
 
 ## 提出前チェックリスト
 
-- [ ] `extension/manifest.json` の `version` を上げた
-- [ ] `description` が 132 文字以内
-- [ ] スクリーンショットが 1280x800（または 640x400）
-- [ ] プロモタイル 440x280 を用意した（任意だが推奨）
-- [ ] プライバシーポリシーを用意した（下記）
-- [ ] 権限の利用目的を説明できる（下記）
-- [ ] ネイティブホストが別途必要な旨を説明に書いた
+- [x] `extension/manifest.json` の `version` を確認した
+- [x] `description` が 132 文字以内
+- [x] スクリーンショットが 1280x800
+- [x] プロモタイル 440x280 を用意した
+- [x] プライバシーポリシーを HTTPS で公開した
+- [x] 権限の利用目的を説明できる
+- [x] ネイティブホストが別途必要な旨を説明に書いた
+- [x] スクリーンショットに個人パスが写っていない
+- [ ] `installer/store-extension-id.txt` に公開後の拡張 ID を記載した
+- [ ] ストアダッシュボードで申請した
 
 ## 権限の正当性
 
@@ -68,43 +71,36 @@ node tools/capture-store-assets.js <32文字> $cloneRoot
 
 ## プライバシーポリシー
 
-ストアはプライバシーポリシーの URL を要求します。以下をそのまま HTML として公開してください（GitHub Pages など）。
+GitHub Pages で公開しています。
 
-```markdown
-# プライバシーポリシー — GitHub Bulk Cloner
-
-最終更新: 2026-11-23
-
-## 収集する情報
-
-本拡張は、いかなる個人情報も収集・送信しません。
-
-## 取り扱うデータ
-
-- 保存先フォルダのパス: ブラウザ内（chrome.storage.local）にのみ保存します。
-- 選択したリポジトリ名: ローカルのネイティブホストに渡し、git clone の実行にのみ使用します。
-
-いずれも外部サーバーへ送信しません。
-
-## 権限の用途
-
-- storage: 保存先フォルダの設定を保持するため
-- nativeMessaging: ローカルの Go ホストと通信するため
-- tabs: 現在のタブの選択状態を取得するため
-- https://github.com/*: リポジトリ一覧にチェックボックスを表示するため
-
-## 第三者提供
-
-行いません。解析ツールも組み込んでいません。
-
-## 変更
-
-本ポリシーを変更する場合は、このページを更新します。
-
-## 連絡先
-
-GitHub リポジトリの Issue までお願いします。
+```text
+https://tonbiattack.github.io/github-bulk-cloner/privacy-policy.html
 ```
+
+原本は [docs/privacy-policy.md](../docs/privacy-policy.md) です。内容を変えたら、このファイルを編集して push すれば Pages に反映されます（`main` ブランチの `docs/` を公開元に設定済み）。
+
+ストア申請の「プライバシーポリシー URL」には上記 URL を入力してください。
+
+## ストア版のインストール導線
+
+ストア版は拡張 ID が固定なので、利用者は ID を転記しません。
+
+1. ストアから拡張を追加する
+2. [GitHub Releases](https://github.com/tonbiattack/github-bulk-cloner/releases) から `github-bulk-cloner-host-windows-amd64.exe` をダウンロードする
+3. PowerShell で `installer\setup.ps1` を実行する
+
+`setup.ps1` は次を一括で行います。
+
+- Git for Windows の存在確認
+- ビルド済みホストのダウンロードと SHA256 検証
+- マニフェスト作成と HKCU 登録
+- ホストへの ping による疎通確認
+
+`-Repair` で再インストール、`-Uninstall` で登録とファイルの削除ができます。
+
+### ストア公開後に必要な作業
+
+`installer/store-extension-id.txt` に、公開された拡張 ID を 1 行で記載してください。`setup.ps1` はこのファイルを読んで `allowed_origins` に設定します。空のままだと「拡張 ID が分かりません」と表示して停止します。
 
 ## 審査で聞かれやすい点
 
@@ -113,3 +109,7 @@ GitHub リポジトリの Issue までお願いします。
 **`nativeMessaging` の用途を具体的に書く。** 「ローカルで git clone を実行するため」と明示します。
 
 **リモートコードを実行しないことを書く。** 拡張は同梱の JS だけを実行します。
+
+## ストア版と開発版の共存
+
+`allowed_origins` は 1 つの ID しか持てないため、ストア版と開発版を同じ端末で同時に使うことはできません。両方試す場合は、片方を使うときに `setup.ps1 -Dev -ExtensionId <ID>` で登録し直してください。`setup.ps1` は別の場所に登録がある場合、`-Repair` を付けない限り上書きしません。

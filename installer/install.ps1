@@ -22,6 +22,11 @@
 .PARAMETER SkipBuild
   Reuse an existing executable instead of rebuilding.
 
+.PARAMETER PrebuiltExe
+  Install this prebuilt host executable instead of building from source.
+  Use it when Go is not installed: download the .exe from the GitHub
+  Releases page and pass its path. Go is then not required.
+
 .PARAMETER SkipRegister
   Build and write the manifest without touching the registry.
 
@@ -30,6 +35,11 @@
 
 .EXAMPLE
   .\install.ps1 -ExtensionId abcdefghijklmnopabcdefghijklmnop
+
+.EXAMPLE
+  # Go を入れずに、配布されている exe を使う
+  .\install.ps1 -ExtensionId abcdefghijklmnopabcdefghijklmnop `
+    -PrebuiltExe .\github-bulk-cloner-host-windows-amd64.exe
 #>
 [CmdletBinding()]
 param(
@@ -37,6 +47,8 @@ param(
   [string]$ExtensionId,
 
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'GitHubBulkCloner'),
+
+  [string]$PrebuiltExe,
 
   [switch]$SkipBuild,
   [switch]$SkipRegister,
@@ -78,8 +90,19 @@ function Assert-Command([string]$Name, [string]$Hint) {
 
 Write-Step '前提条件を確認しています'
 
-$goPath = Assert-Command 'go' 'Go 1.24 以降をインストールし、PATH に追加してください。'
-Write-Ok "go: $goPath"
+$usePrebuilt = -not [string]::IsNullOrWhiteSpace($PrebuiltExe)
+
+if ($usePrebuilt) {
+  # Go is only needed to build, so a prebuilt binary removes the requirement.
+  if (-not (Test-Path -LiteralPath $PrebuiltExe)) {
+    throw "配布バイナリが見つかりません: $PrebuiltExe"
+  }
+  $PrebuiltExe = (Resolve-Path -LiteralPath $PrebuiltExe).Path
+  Write-Ok "prebuilt: $PrebuiltExe"
+} else {
+  $goPath = Assert-Command 'go' 'Go 1.24 以降をインストールし、PATH に追加してください。Go を使わない場合は -PrebuiltExe で配布バイナリを指定できます。'
+  Write-Ok "go: $goPath"
+}
 
 $gitPath = Assert-Command 'git' 'Git for Windows をインストールし、PATH に追加してください。'
 Write-Ok "git: $gitPath"
@@ -108,7 +131,23 @@ if (-not $SkipRegister -and -not $ExtensionId) {
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 $exePath = Join-Path $InstallDir $ExeName
 
-if ($SkipBuild) {
+# A running host locks the executable; stop only our own binary.
+function Stop-RunningHost {
+  Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($ExeName)) -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $exePath } |
+    ForEach-Object {
+      Write-Warn "起動中のホストを終了します (PID $($_.Id))"
+      Stop-Process -Id $_.Id -Force
+    }
+  Start-Sleep -Milliseconds 300
+}
+
+if ($usePrebuilt) {
+  Write-Step '配布バイナリを配置しています'
+  Stop-RunningHost
+  Copy-Item -LiteralPath $PrebuiltExe -Destination $exePath -Force
+  Write-Ok $exePath
+} elseif ($SkipBuild) {
   if (-not (Test-Path -LiteralPath $exePath)) {
     throw "-SkipBuild が指定されましたが、$exePath が存在しません。"
   }
@@ -117,14 +156,7 @@ if ($SkipBuild) {
 } else {
   Write-Step 'ネイティブホストをビルドしています'
 
-  # A running host locks the executable; stop only our own binary.
-  Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($ExeName)) -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -eq $exePath } |
-    ForEach-Object {
-      Write-Warn "起動中のホストを終了します (PID $($_.Id))"
-      Stop-Process -Id $_.Id -Force
-    }
-  Start-Sleep -Milliseconds 300
+  Stop-RunningHost
 
   $version = '0.1.0'
   Push-Location $NativeHostDir

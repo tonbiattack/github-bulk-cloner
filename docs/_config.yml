@@ -1,0 +1,6 @@
+title: GitHub Bulk Cloner
+description: GitHub のリポジトリ一覧からその場で clone する Chrome 拡張
+theme: jekyll-theme-cayman
+markdown: kramdown
+exclude:
+  - competitive-research-quick-clone.md

@@ -36,39 +36,65 @@ GitHub の一覧ページ
 | | |
 | --- | --- |
 | **チェックで即実行** | ボタンを押す手順がありません。チェックを付けた瞬間に clone します。 |
-| **フォルダは自動作成** | 保存先が無ければ親フォルダごと作ります。事前準備は不要です。 |
-| **既存は触らない** | 同名フォルダがあれば skip。上書き・削除・pull はしません。 |
+| **フォルダは自動作成** | 保存先が無ければ親フォルダごと作ります。Owner ごとに分ける設定もあります。 |
+| **既存は触らない** | 同名フォルダは変更しません。別リポジトリなら衝突として明示します。 |
 | **Private にも対応** | 認証済みの `gh` CLI があれば Private リポジトリも clone できます。 |
 | **資格情報を扱わない** | トークンは拡張に渡しません。認証はローカルの Git / gh に委譲します。 |
 | **シェルを介さない** | Go ホストが固定引数で `git` / `gh` を直接実行します。 |
 
 ## 動作環境
 
-- Windows 10 / 11
+- Windows 10 / 11 (x64)
 - Google Chrome 102 以降
-- [Go](https://go.dev/dl/) 1.24 以降（ホストのビルドに使用）
 - [Git for Windows](https://git-scm.com/download/win)
 - [GitHub CLI](https://cli.github.com/)（Private リポジトリを使う場合のみ）
 
+Go は不要です。ネイティブホストは [GitHub Releases](https://github.com/tonbiattack/github-bulk-cloner/releases) でビルド済みのバイナリを配布しています。
+
 ## インストール
+
+一般利用者は 3 ステップです。Go のインストールは不要です。
+
+**1. 拡張を入れる** — Chrome Web Store から追加します（開発版は `chrome://extensions` で `extension` フォルダを読み込みます）。
+
+**2. リポジトリを取得する** — `setup.ps1` はリポジトリ内のスクリプトです。
 
 ```powershell
 git clone https://github.com/tonbiattack/github-bulk-cloner.git
 cd github-bulk-cloner
 ```
 
-1. `chrome://extensions` を開き、**デベロッパーモード**を有効にする
-2. **パッケージ化されていない拡張機能を読み込む** で `extension` フォルダを選ぶ
-3. 表示された拡張 ID（32文字）を控える
-4. その ID でネイティブホストを登録する
+**3. セットアップを実行する**
 
 ```powershell
-.\installer\install.ps1 -ExtensionId <32文字の拡張ID>
+.\installer\setup.ps1
 ```
 
-インストーラはビルド・マニフェスト作成・レジストリ登録（HKCU）・疎通確認まで行います。管理者権限は不要です。
+Git の確認、ビルド済みホストのダウンロードと SHA256 検証、マニフェスト作成、HKCU 登録、疎通確認までを一括で行います。管理者権限は不要です。
+
+- 開発版の拡張を使う場合: `.\installer\setup.ps1 -Dev -ExtensionId <拡張ID>`
+- オフライン / 手動でバイナリを置く場合: `.\installer\setup.ps1 -HostPath .\github-bulk-cloner-host-windows-amd64.exe`
+- 修復: `.\installer\setup.ps1 -Repair`
+- アンインストール: `.\installer\setup.ps1 -Uninstall`
 
 詳しい手順とトラブルシューティングは [docs/setup.md](docs/setup.md) を参照してください。
+
+### 配布バイナリの出所と検証
+
+`github-bulk-cloner-host-windows-amd64.exe` は GitHub Actions（[`.github/workflows/release.yml`](.github/workflows/release.yml)）が `native-host/` からビルドしたものです。タグを push するとビルドと Release 作成が走ります。
+
+チェックサムは同じ Release の `SHA256SUMS.txt` にあります。手元で確認するには:
+
+```powershell
+Get-FileHash .\github-bulk-cloner-host-windows-amd64.exe -Algorithm SHA256
+```
+
+`setup.ps1` はダウンロード時にこのチェックサムを自動で照合します。ローカルで同じバイナリを作るには:
+
+```powershell
+cd native-host
+go build -trimpath -ldflags "-s -w -X main.version=0.1.0" -o github-bulk-cloner-host.exe ./cmd/host
+```
 
 ## 使い方
 
@@ -182,9 +208,18 @@ docs/            セットアップと開発の手順書
 
 - 同時実行は 1 リクエスト。リポジトリは順番に処理します
 - 1 リクエストあたり最大 200 リポジトリ、1 リポジトリあたり 10 分でタイムアウト
-- 保存先は `<root>/<repo>` のフラット配置（owner ディレクトリは作りません）
+- 保存先は既定で `<root>/<repo>` のフラット配置。所有者ごとに分ける設定もあります
 - 既存フォルダの更新（pull）は行いません。手動で `git pull` してください
-- 対応 OS は Windows のみ
+- 対応 OS は Windows のみ（x64）
+- ストア版と開発版は同じ端末で同時に使えません（`allowed_origins` は 1 つの ID のみ）
+
+### 既知の制限
+
+- **ネイティブホストが必須**: 拡張単体では clone できません
+- **Go は不要**: Releases のビルド済みバイナリを使います
+- **`gh` 未認証**: Private リポジトリは clone できません。`gh auth login` が必要です
+- **同名リポジトリの衝突**: フラット配置では別 owner の同名 repo が同じフォルダを指します。衝突として検出し、上書きはしません。所有者ごとのフォルダ設定で回避できます
+- **ネイティブホストのエラーは Chrome では区別できない**: 「未登録」と「ID 不一致」は同じエラーとして返るため、アプリ側でもまとめて表示します
 
 ## コントリビュート
 
@@ -193,6 +228,10 @@ Issue と Pull Request を歓迎します。変更を送る前に、上記のテ
 ## ライセンス
 
 [MIT](LICENSE)
+
+## プライバシーポリシー
+
+[docs/privacy-policy.md](docs/privacy-policy.md) / [公開ページ](https://tonbiattack.github.io/github-bulk-cloner/privacy-policy.html)
 
 ## 謝辞
 

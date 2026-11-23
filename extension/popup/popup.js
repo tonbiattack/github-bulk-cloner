@@ -7,7 +7,13 @@
 
   const elements = {
     hostStatus: document.getElementById('host-status'),
+    hostSection: document.getElementById('host-section'),
+    hostDetail: document.getElementById('host-detail'),
+    hostCapabilities: document.getElementById('host-capabilities'),
+    hostSetup: document.getElementById('host-setup'),
+    hostRecheck: document.getElementById('host-recheck'),
     rootInput: document.getElementById('root-input'),
+    ownerLayout: document.getElementById('owner-layout'),
     saveRoot: document.getElementById('save-root'),
     rootHint: document.getElementById('root-hint'),
     selectionCount: document.getElementById('selection-count'),
@@ -22,6 +28,9 @@
     resultList: document.getElementById('result-list'),
     resultEmpty: document.getElementById('result-empty')
   };
+
+  /** Latest host diagnostic result from the service worker. */
+  let hostState = { state: 'unknown', message: '', setup: '' };
 
   /** Selected specs reported by the content script. */
   let selected = [];
@@ -62,6 +71,7 @@
     switch (status) {
       case 'success': return '成功';
       case 'skipped': return 'スキップ';
+      case 'conflict': return '衝突';
       case 'failed': return '失敗';
       default: return status;
     }
@@ -134,6 +144,9 @@
         ' / 失敗 ',
         strong(String(summary.failed || 0))
       );
+      if (summary.conflict) {
+        line.append(' / 衝突 ', strong(String(summary.conflict)));
+      }
       elements.summary.appendChild(line);
     } else {
       elements.summary.hidden = true;
@@ -188,17 +201,70 @@
     return item;
   }
 
+  /** Badge label and tone for each host state. */
+  const HOST_BADGES = {
+    ok: { label: '接続 OK', tone: 'ok' },
+    'not-registered': { label: '未登録', tone: 'error' },
+    'git-missing': { label: 'Git なし', tone: 'warn' },
+    unresponsive: { label: '応答なし', tone: 'error' },
+    error: { label: '接続エラー', tone: 'error' },
+    unknown: { label: '未確認', tone: 'unknown' }
+  };
+
   function renderHostStatus(state) {
-    elements.hostStatus.className = 'badge';
-    if (state.ok) {
-      elements.hostStatus.classList.add('badge-ok');
-      elements.hostStatus.textContent = '接続 OK';
-      elements.hostStatus.title = state.version ? 'ホスト v' + state.version : '接続済み';
-    } else {
-      elements.hostStatus.classList.add('badge-error');
-      elements.hostStatus.textContent = '未接続';
-      elements.hostStatus.title = state.message || '';
+    hostState = state || { state: 'unknown', message: '', setup: '' };
+
+    const badge = HOST_BADGES[hostState.state] || HOST_BADGES.unknown;
+    elements.hostStatus.className = 'badge badge-' + badge.tone;
+    elements.hostStatus.textContent = badge.label;
+    elements.hostStatus.title = hostState.message || '';
+
+    // The detail panel only appears when something needs attention.
+    const needsAttention = hostState.state !== 'ok' && hostState.state !== 'unknown';
+    elements.hostSection.hidden = !needsAttention;
+    if (!needsAttention) return;
+
+    elements.hostDetail.textContent = hostState.message || '';
+    elements.hostDetail.classList.toggle('error', badge.tone === 'error');
+
+    elements.hostSetup.hidden = !hostState.setup;
+    elements.hostSetup.textContent = hostState.setup || '';
+
+    renderCapabilities(hostState.capabilities);
+  }
+
+  /** Lists what the host reported. Never shows anything it did not report. */
+  function renderCapabilities(capabilities) {
+    elements.hostCapabilities.replaceChildren();
+
+    if (!capabilities) {
+      elements.hostCapabilities.hidden = true;
+      return;
     }
+
+    const rows = [];
+    if (capabilities.os) {
+      rows.push(['OS', capabilities.os + (capabilities.arch ? ' / ' + capabilities.arch : '')]);
+    }
+    rows.push(['Git', capabilities.gitAvailable ? '利用可能' : '見つかりません']);
+    if (capabilities.ghAvailable) {
+      rows.push(['gh', capabilities.ghAuthenticated ? '認証済み' : '未認証']);
+    } else {
+      rows.push(['gh', '未インストール']);
+    }
+
+    for (const [label, value] of rows) {
+      const item = document.createElement('li');
+      const key = document.createElement('span');
+      key.className = 'capability-label';
+      key.textContent = label;
+      const text = document.createElement('span');
+      text.textContent = value;
+      item.append(key, text);
+      elements.hostCapabilities.appendChild(item);
+    }
+
+    elements.hostCapabilities.hidden = false;
   }
 
   // ------------------------------------------------------------------ load
@@ -231,6 +297,21 @@
     if (settings && typeof settings.root === 'string') {
       elements.rootInput.value = settings.root;
     }
+    if (settings) {
+      elements.ownerLayout.checked = settings.layout === 'owner';
+      updateLayoutHint();
+    }
+  }
+
+  /** Keeps the layout hint in step with the checkbox. */
+  function updateLayoutHint() {
+    if (elements.ownerLayout.checked) {
+      setHint(elements.rootHint,
+        '各リポジトリは <保存先>\\<owner>\\<repo> に clone されます。同名リポジトリを所有者ごとに分けられます。', false);
+    } else {
+      setHint(elements.rootHint,
+        '各リポジトリは <保存先>\\<repo> に clone されます。フォルダが無ければ自動作成します。', false);
+    }
   }
 
   async function loadRunState() {
@@ -243,20 +324,35 @@
 
   async function checkHost() {
     const result = await sendToWorker({ type: 'gbc:checkHost' });
-    renderHostStatus(result || { ok: false, message: '状態を取得できません' });
+    renderHostStatus(result || { state: 'error', message: '状態を取得できません' });
   }
 
   // --------------------------------------------------------------- actions
 
-  elements.saveRoot.addEventListener('click', async () => {
+  async function saveSettings() {
     const root = elements.rootInput.value.trim();
-    const result = await sendToWorker({ type: 'gbc:saveSettings', settings: { root } });
+    const layout = elements.ownerLayout.checked ? 'owner' : 'flat';
+    const result = await sendToWorker({ type: 'gbc:saveSettings', settings: { root, layout } });
     if (result && result.error) {
       setHint(elements.rootHint, result.error, true);
       return;
     }
     elements.rootInput.value = result.root;
+    elements.ownerLayout.checked = result.layout === 'owner';
     setHint(elements.rootHint, '保存しました: ' + result.root, false);
+    updateLayoutHint();
+  }
+
+  elements.saveRoot.addEventListener('click', saveSettings);
+
+  elements.ownerLayout.addEventListener('change', () => {
+    updateLayoutHint();
+    saveSettings();
+  });
+
+  elements.hostRecheck.addEventListener('click', () => {
+    elements.hostStatus.textContent = '確認中…';
+    checkHost();
   });
 
   elements.rootInput.addEventListener('keydown', (event) => {

@@ -248,9 +248,79 @@ button.secondary:not(:disabled):hover {
   background: color-mix(in srgb, var(--success) 14%, transparent);
 }
 
+.badge-warn {
+  color: var(--skipped);
+  background: color-mix(in srgb, var(--skipped) 14%, transparent);
+}
+
 .badge-error {
   color: var(--failed);
   background: color-mix(in srgb, var(--failed) 14%, transparent);
+}
+
+/* Inline text button, used for "再確認". */
+button.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0969da;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+button.link:hover {
+  filter: brightness(1.1);
+}
+
+/* Layout toggle below the root input. */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #1f883d;
+}
+
+/* Host diagnostics capabilities list. */
+.capabilities {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capabilities li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.capability-label {
+  min-width: 42px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.hint.setup {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid #0969da;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg);
 }
 
 .summary {

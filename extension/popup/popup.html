@@ -21,7 +21,21 @@
              placeholder="C:\apps">
       <button id="save-root" type="button" class="secondary">保存</button>
     </div>
+    <label class="checkbox-row" for="owner-layout">
+      <input id="owner-layout" type="checkbox">
+      <span>所有者ごとにフォルダを分ける（&lt;保存先&gt;\&lt;owner&gt;\&lt;repo&gt;）</span>
+    </label>
     <p id="root-hint" class="hint">各リポジトリは &lt;保存先&gt;\&lt;repo&gt; に clone されます。フォルダが無ければ自動作成します。</p>
+  </section>
+
+  <section id="host-section" class="section" hidden>
+    <div class="row row-between">
+      <span class="label">ネイティブホスト</span>
+      <button id="host-recheck" type="button" class="link">再確認</button>
+    </div>
+    <p id="host-detail" class="hint"></p>
+    <ul id="host-capabilities" class="capabilities" hidden></ul>
+    <p id="host-setup" class="hint setup" hidden></p>
   </section>
 
   <section class="section">

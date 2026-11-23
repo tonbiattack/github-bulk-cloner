@@ -114,7 +114,10 @@ go test ./...               # 実クローンを含む
 | `internal/protocol/protocol_test.go` | フレームの読み書き、長さ上限、切り詰め、並行書き込み |
 | `internal/validate/validate_test.go` | `owner/repo` の許可・拒否、root 検証、パス封じ込め、ジャンクション逸脱 |
 | `internal/clone/runner_test.go` | 不正入力の事前拒否、既存 skip、認証エラー判定、メッセージ整形、実クローン |
+| `internal/clone/conflict_test.go` | 同名リポジトリの衝突検出、リモート不明時の扱い、owner 配置 |
+| `internal/validate/remote_test.go` | GitHub リモート URL の解析、レイアウト別の保存先 |
 | `cmd/host/main_test.go` | ping、未対応種別、入力検証、重複排除、失敗後も継続、EOF |
+| `cmd/host/conflict_test.go` | 衝突の summary、レイアウト指定、ping の capabilities |
 
 ### 拡張（Node）
 
@@ -186,6 +189,33 @@ node extension/test/cdp-invalidate-e2e.js <32文字>
 
 このテストは修正前のコードに対して実行すると失敗する（例外が出て UI も残る）ため、回帰検出に使えます。
 
+診断表示と衝突判定は別スクリプトで確認します。
+
+```powershell
+$env:CDP_PORT = '9339'
+node extension/test/cdp-diagnostics-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-diag-scratch')
+```
+
+`cdp-diagnostics-e2e.js` が確認する内容:
+
+- 正常なホストが `ok` と capabilities（git / OS）を返す
+- ポップアップが「接続 OK」を表示し、セットアップ案内を隠す
+- 別 owner の同名リポジトリが `conflict` になり、既存リポジトリ名を含む
+- 衝突が `skipped` に数えられない
+- 同じリポジトリは従来どおり `skipped` になる
+- owner 配置が入れ子のパスを指し、衝突しない
+- レイアウト設定が保存・復元される
+
+異常系（ホスト未登録など）は手動で確認します。
+
+```powershell
+# ホストを一時的に登録解除して、バッジが「未登録」になり
+# セットアップ案内が出ることを確認する
+Remove-Item 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.tonbiattack.github_bulk_cloner' -Recurse
+# 確認後に戻す
+.\installer\setup.ps1 -Repair
+```
+
 ### ホスト単体
 
 Chrome を介さず、プロトコルを直接叩いて確認できます。
@@ -209,7 +239,7 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 {"type":"result","requestId":"...","repository":"owner/repo","status":"success","path":"C:\\apps\\repo","method":"git"}
 ```
 
-`status` は `success` / `skipped` / `failed`。`skipped` のときは `existingGitRepo` が付きます。
+`status` は `success` / `skipped` / `conflict` / `failed`。`skipped` のときは `existingGitRepo` が付きます。`conflict` のときは `existingRepository` に占有している `owner/repo` が入ります。
 
 ホスト → 拡張（完了）:
 
@@ -223,16 +253,16 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 {"type":"error","requestId":"...","code":"invalid_root","message":"..."}
 ```
 
-`code` は `invalid_request` / `invalid_root` / `git_missing` / `too_many_repositories` / `unsupported_type` / `cancelled`。
+`code` は `invalid_request` / `invalid_root` / `invalid_layout` / `git_missing` / `too_many_repositories` / `unsupported_type` / `cancelled`。
 
-`ping` には `{"type":"pong","version":"0.1.0"}` が返ります。
+`ping` には `{"type":"pong","version":"0.1.0","capabilities":{...}}` が返ります。`capabilities` の内容は「ホスト診断」を参照してください。
 
 ## チェック時の自動 clone
 
 チェックボックスにチェックを付けると、そのリポジトリを**その場で clone** します。GitHub のページを開いたまま実行できます。
 
 - チェックを付けた瞬間に、そのリポジトリだけを clone する
-- 行のチェックボックス横に状態を表示する（`clone 中…` / `clone 済み` / `既にあります` / 失敗理由）
+- 行のチェックボックス横に状態を表示する（`clone 中…` / `clone 済み` / `既にあります` / `別リポジトリあり` / 失敗理由）
 - **チェックを外しても clone はしない**。選択が外れるだけ
 - 連続でチェックしても「すでに実行中」にならないよう、service worker 側でキューに積んで 1 件ずつ処理する
 
@@ -243,15 +273,108 @@ Chrome を介さず、プロトコルを直接叩いて確認できます。
 | 保存先フォルダが無い | 親フォルダごと自動作成する |
 | 保存先が相対パス | `invalid_root` で拒否する |
 | 保存先がファイル | `invalid_root` で拒否する |
-| 保存先に同名フォルダがある | `skipped`。上書き・削除・pull をしない |
+| 保存先に同名フォルダがある | 変更しない。下記の衝突判定を行う |
 | 保存先が書き込めない | 作成に失敗し `invalid_root` を返す |
 
-clone 先は `<root>/<repo>` のフラット配置です。owner ディレクトリは作りません。
+### 同名リポジトリの衝突判定
+
+フラット配置では `ownerA/tool` と `ownerB/tool` が同じ `<root>/tool` を指します。取り違えを防ぐため、既存フォルダの `origin` リモートを読んで照合します。
+
+| 既存フォルダの状態 | status | 意味 |
+| --- | --- | --- |
+| 同じ `owner/repo` | `skipped` | 既に clone 済み |
+| 別の `owner/repo` | `conflict` | 別リポジトリが占有している。**上書きしない** |
+| リモート不明 / GitHub 以外 | `skipped` | 確認できていないので、一致したとは言わない |
+| Git リポジトリでない | `skipped` | 判定材料が無いので触らない |
+
+`conflict` は `skipped` と別の status です。「既に clone 済み」と誤って伝えないために分けています。`summary` にも `conflict` として別に数えます。
+
+衝突を避けたい場合は、ポップアップの「所有者ごとにフォルダを分ける」を有効にすると `<root>/<owner>/<repo>` に保存します。要求には `layout` として渡します。
+
+```json
+{"type":"clone","requestId":"...","root":"C:\\apps","layout":"owner","repositories":["owner/repo"]}
+```
+
+`layout` は `flat`（既定）または `owner`。それ以外は `invalid_layout` で拒否します。
+
+### ホスト診断
+
+ポップアップのバッジは、ホストが実際に報告した内容だけを表示します。ブラウザから観測できない Windows / Git / gh の状態を推測して表示することはありません。
+
+`ping` の応答に `capabilities` が含まれます。
+
+```json
+{"type":"pong","version":"0.1.0","capabilities":{
+  "gitAvailable":true,"ghAvailable":true,"ghAuthenticated":true,
+  "os":"windows","arch":"amd64"}}
+```
+
+| 状態 | バッジ | 意味 |
+| --- | --- | --- |
+| `ok` | 接続 OK | 疎通し、Git も使える |
+| `not-registered` | 未登録 | 未登録、またはこの拡張 ID 用に登録されていない |
+| `git-missing` | Git なし | ホストは動くが Git が見つからない |
+| `unresponsive` | 応答なし | ping に応答しない |
+| `error` | 接続エラー | その他の接続失敗 |
+
+**Chrome は「未登録」と「ID 不一致」を同じエラーとして返します。** そのため区別せず `not-registered` にまとめ、対処方法を併記します。区別できるかのように表示してはいけません。
+
+## リリース
+
+ネイティブホストのビルド済みバイナリは GitHub Actions が作ります。利用者は Go を入れずに済みます。
+
+### 手順
+
+1. `extension/manifest.json` の `version` を上げる
+2. タグを push する
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) が次を行います。
+
+- `go vet` と `go test -short`
+- Windows amd64 向けのビルド（`CGO_ENABLED=0`、`-trimpath`、バージョンを ldflags で埋め込み）
+- `SHA256SUMS.txt` の生成
+- 拡張の zip 作成（`tools/package-extension.ps1`）
+- GitHub Release の作成と添付
+
+### リリースに含まれるもの
+
+| ファイル | 用途 |
+| --- | --- |
+| `github-bulk-cloner-host-windows-amd64.exe` | ネイティブホスト本体 |
+| `github-bulk-cloner-host.exe` | インストーラが参照する安定名（同一バイナリ） |
+| `SHA256SUMS.txt` | チェックサム |
+| `github-bulk-cloner-<version>.zip` | ストア提出用の拡張パッケージ |
+
+### ローカルでの確認
+
+CI と同じビルドを手元で再現できます。
+
+```powershell
+cd native-host
+$env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
+go build -trimpath -ldflags "-s -w -X main.version=0.2.0" `
+  -o github-bulk-cloner-host-windows-amd64.exe ./cmd/host
+Get-FileHash .\github-bulk-cloner-host-windows-amd64.exe -Algorithm SHA256
+```
+
+`tools/package-extension.ps1` はマニフェストを検証し、参照ファイルの存在を確認してから zip を作ります。
+
+## ストア公開
+
+`store/` に掲載文言・スクリーンショット・プロモ画像があります。手順は [store/README.md](../store/README.md) を参照してください。
+
+公開後は `installer/store-extension-id.txt` に拡張 ID を記載します。`installer/setup.ps1` がこのファイルを読んで `allowed_origins` に設定します。
 
 ## 制約
 
 - 同時実行は 1 リクエスト。リポジトリは順番に処理する。
 - 1 リクエストあたり最大 200 リポジトリ。
 - 1 リポジトリあたりのタイムアウトは 10 分。
-- 保存先は `<root>/<repo>` のフラット配置。owner ディレクトリは作らない。
+- 保存先は既定で `<root>/<repo>` のフラット配置。`layout: "owner"` で `<root>/<owner>/<repo>` になる。
 - 保存先フォルダが無ければ自動作成する。相対パスとファイルは拒否する。
+- ストア版と開発版は同時に使えない（`allowed_origins` は 1 つの ID のみ）。

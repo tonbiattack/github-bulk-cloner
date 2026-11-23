@@ -65,16 +65,27 @@ clone 先は「保存先フォルダ\リポジトリ名」です。保存先は�
 
 この拡張は単体では動作しません。git clone を実行するために、Windows 用のネイティブホストを別途インストールする必要があります。
 
-インストール手順は GitHub リポジトリの README を参照してください。
+インストールは 3 ステップです。Go のインストールは不要です。
+
+1. GitHub Releases から github-bulk-cloner-host-windows-amd64.exe をダウンロードする
+2. リポジトリを取得し、PowerShell で installer\setup.ps1 を実行する
+3. chrome://extensions で拡張を再読み込みする
+
+セットアップ手順の詳細:
 https://github.com/tonbiattack/github-bulk-cloner
 
 ■ 動作環境
 
-・Windows 10 / 11
+・Windows 10 / 11 (x64)
 ・Google Chrome 102 以降
-・Go 1.24 以降（ホストのビルドに使用）
 ・Git for Windows
 ・GitHub CLI（Private リポジトリを使う場合のみ）
+
+■ 保存先の構成
+
+既定では「保存先\リポジトリ名」に clone します。所有者の異なる同名リポジトリを扱う場合は、ポップアップの設定で「所有者ごとにフォルダを分ける」を有効にすると「保存先\所有者\リポジトリ名」になります。
+
+既に同名フォルダがある場合、それが別のリポジトリなら「衝突」として表示し、上書きも削除もしません。
 
 ■ プライバシー
 
@@ -103,7 +114,9 @@ GitHub アカウントの連絡先メールアドレスを入力してくださ�
 
 ## プライバシーポリシー URL
 
-`store/README.md` の「プライバシーポリシー」節を HTML として公開し、その URL を入力してください。
+```text
+https://tonbiattack.github.io/github-bulk-cloner/privacy-policy.html
+```
 
 ## スクリーンショット
 
@@ -112,7 +125,7 @@ GitHub アカウントの連絡先メールアドレスを入力してくださ�
 | ファイル | 内容 |
 | --- | --- |
 | `01-repository-list.png` | 一覧にチェックボックスが表示されている状態 |
-| `02-clone-in-progress.png` | チェック後に clone が実行された状態 |
+| `02-clone-complete.png` | チェック後に clone が実行された状態 |
 | `03-popup-results.png` | ポップアップと実行結果 |
 
 ## プロモーション画像

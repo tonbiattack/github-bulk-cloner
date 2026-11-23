@@ -256,6 +256,14 @@
       case 'skipped':
         setRowStatus(result.repository, 'skipped', '既にあります');
         break;
+      case 'conflict':
+        // Another repository already occupies the destination; do not claim
+        // this one is present.
+        setRowStatus(result.repository, 'conflict',
+          result.existingRepository
+            ? '別リポジトリあり (' + result.existingRepository + ')'
+            : '別リポジトリあり');
+        break;
       case 'failed':
         setRowStatus(result.repository, 'failed', result.message || '失敗');
         break;

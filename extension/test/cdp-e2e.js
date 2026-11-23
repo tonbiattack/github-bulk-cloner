@@ -107,7 +107,7 @@ async function main() {
   }
 
   const host = await evaluate(sw, 'chrome.runtime.sendMessage({type:"gbc:checkHost"})');
-  check('native host answers ping', Boolean(host && host.ok), JSON.stringify(host));
+  check('native host answers ping', Boolean(host && host.state === 'ok'), JSON.stringify(host));
 
   // ------------------------------------------------------------ content script
   // Close stale listing tabs from earlier runs so the tab lookup below cannot
@@ -134,14 +134,24 @@ async function main() {
 
   // Content scripts run in an isolated world, so ask the content script itself
   // through the extension messaging channel rather than reading page globals.
-  const pageState = await evaluate(sw, `
-    (async () => {
-      const tabs = await chrome.tabs.query({});
-      const target = tabs.find((t) => t.url && t.url.includes('tab=repositories'));
-      if (!target) return { error: 'listing tab not found', tabs: tabs.map((t) => t.url) };
-      return chrome.tabs.sendMessage(target.id, { type: 'gbc:getState' });
-    })()
-  `);
+  // The page may still be loading, so retry until the script answers.
+  let pageState = null;
+  for (let i = 0; i < 30; i++) {
+    pageState = await evaluate(sw, `
+      (async () => {
+        const tabs = await chrome.tabs.query({});
+        const target = tabs.find((t) => t.url && t.url.includes('tab=repositories'));
+        if (!target) return { error: 'listing tab not found' };
+        try {
+          return await chrome.tabs.sendMessage(target.id, { type: 'gbc:getState' });
+        } catch (e) {
+          return { error: String(e && e.message ? e.message : e) };
+        }
+      })()
+    `);
+    if (pageState && !pageState.error && pageState.supported === true) break;
+    await sleep(1000);
+  }
   check('content script reports a supported page',
     Boolean(pageState && pageState.supported === true),
     JSON.stringify(pageState && pageState.supported));

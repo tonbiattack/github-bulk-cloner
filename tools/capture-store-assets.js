@@ -135,15 +135,28 @@ async function main() {
   // 1. Listing with checkboxes, nothing selected.
   await capture(page, path.join(OUT, 'screenshots', '01-repository-list.png'), 1280, 800);
 
-  // 2. Check a couple of boxes so the clone badges appear.
+  // 2. Check a couple of boxes so the clone badges appear, then wait until the
+  // row badges settle (not "working") so the screenshot shows the outcome.
   await evaluate(page, `
     (() => {
       const boxes = [...document.querySelectorAll('.gbc-checkbox')];
       boxes.slice(0, 2).forEach((b) => { if (!b.checked) b.click(); });
     })()
   `);
-  await sleep(9000);
-  await capture(page, path.join(OUT, 'screenshots', '02-clone-in-progress.png'), 1280, 800);
+
+  for (let i = 0; i < 180; i++) {
+    const settled = await evaluate(page, `
+      (() => {
+        const badges = [...document.querySelectorAll('.gbc-row-status')];
+        if (badges.length === 0) return false;
+        return badges.every((b) => b.dataset.state && b.dataset.state !== 'working');
+      })()
+    `);
+    if (settled) break;
+    await sleep(1000);
+  }
+  await sleep(1200);
+  await capture(page, path.join(OUT, 'screenshots', '02-clone-complete.png'), 1280, 800);
 
   // 3. Popup with finished results, composed on a branded background so the
   // narrow popup is legible at the store's 1280x800 size.

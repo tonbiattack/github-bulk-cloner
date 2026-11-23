@@ -72,11 +72,12 @@ async function persistRunState() {
 // ------------------------------------------------------------------ storage
 
 async function getSettings() {
-  const stored = await chrome.storage.local.get({ root: DEFAULT_ROOT });
+  const stored = await chrome.storage.local.get({ root: DEFAULT_ROOT, layout: 'flat' });
   const root = typeof stored.root === 'string' && stored.root.trim() !== ''
     ? stored.root
     : DEFAULT_ROOT;
-  return { root };
+  const layout = stored.layout === 'owner' ? 'owner' : 'flat';
+  return { root, layout };
 }
 
 async function saveSettings(settings) {
@@ -84,8 +85,9 @@ async function saveSettings(settings) {
   if (root === '') {
     throw new Error('保存先を入力してください');
   }
-  await chrome.storage.local.set({ root });
-  return { root };
+  const layout = settings.layout === 'owner' ? 'owner' : 'flat';
+  await chrome.storage.local.set({ root, layout });
+  return { root, layout };
 }
 
 // -------------------------------------------------------------- run helpers
@@ -290,7 +292,7 @@ async function startRun(kind, repositories) {
     throw new Error('一度に選択できるのは ' + MAX_REPOSITORIES + ' 件までです');
   }
 
-  const { root } = await getSettings();
+  const { root, layout } = await getSettings();
   resetRun(specs.length, kind);
   await persistRunState();
   broadcast();
@@ -317,7 +319,8 @@ async function startRun(kind, repositories) {
           path: message.path || '',
           message: message.message || '',
           method: message.method || '',
-          existingGitRepo: message.existingGitRepo
+          existingGitRepo: message.existingGitRepo,
+          existingRepository: message.existingRepository
         });
         runState.completed = runState.results.length;
         broadcast();
@@ -363,6 +366,7 @@ async function startRun(kind, repositories) {
       type: kind,
       requestId: runState.requestId,
       root,
+      layout,
       repositories: specs
     });
   } catch (error) {
@@ -378,16 +382,27 @@ function startClone(repositories) {
 }
 
 function summarize(results) {
-  const summary = { success: 0, skipped: 0, failed: 0 };
+  const summary = { success: 0, skipped: 0, failed: 0, conflict: 0 };
   for (const result of results) {
     if (result.status === 'success') summary.success++;
     else if (result.status === 'skipped') summary.skipped++;
+    else if (result.status === 'conflict') summary.conflict++;
     else summary.failed++;
   }
   return summary;
 }
 
-/** Checks that the host is installed and answers a ping. */
+/**
+ * Checks that the host is installed, reachable, and usable.
+ *
+ * Returns a structured state rather than a bare ok flag, so the popup can tell
+ * "not registered" from "installed but git is missing" from "no response".
+ * Only facts the host actually reports are included; nothing about Windows or
+ * Git is guessed in the browser.
+ *
+ * @returns {Promise<{state: string, message: string, version?: string,
+ *   capabilities?: object}>}
+ */
 async function checkHost() {
   return new Promise((resolve) => {
     let settled = false;
@@ -401,36 +416,95 @@ async function checkHost() {
     try {
       probe = chrome.runtime.connectNative(HOST_NAME);
     } catch (error) {
-      settle({ ok: false, message: describeConnectError(error) });
+      settle(classifyConnectError(error));
       return;
     }
 
     const timer = setTimeout(() => {
       try { probe.disconnect(); } catch { /* ignore */ }
-      settle({ ok: false, message: 'ネイティブホストから応答がありません。' });
+      settle({
+        state: 'unresponsive',
+        message: 'ネイティブホストから応答がありません。ホストの実行に失敗している可能性があります。'
+      });
     }, 5000);
 
     probe.onMessage.addListener((message) => {
-      if (message && message.type === 'pong') {
-        clearTimeout(timer);
-        try { probe.disconnect(); } catch { /* ignore */ }
-        settle({ ok: true, version: message.version || '' });
+      if (!message || message.type !== 'pong') return;
+
+      clearTimeout(timer);
+      try { probe.disconnect(); } catch { /* ignore */ }
+
+      const version = message.version || '';
+      const capabilities = message.capabilities || {
+        gitAvailable: false, ghAvailable: false, ghAuthenticated: false, os: '', arch: ''
+      };
+
+      if (!capabilities.gitAvailable) {
+        settle({
+          state: 'git-missing',
+          message: 'ネイティブホストは動いていますが、Git が見つかりません。',
+          version,
+          capabilities
+        });
+        return;
       }
+
+      settle({ state: 'ok', message: '接続 OK', version, capabilities });
     });
 
     probe.onDisconnect.addListener(() => {
       clearTimeout(timer);
       const reason = chrome.runtime.lastError ? chrome.runtime.lastError.message : '';
-      settle({ ok: false, message: describeConnectError(reason || 'host disconnected') });
+      settle(classifyConnectError(reason || 'host disconnected'));
     });
 
     try {
       probe.postMessage({ type: 'ping' });
     } catch (error) {
       clearTimeout(timer);
-      settle({ ok: false, message: describeConnectError(error) });
+      settle(classifyConnectError(error));
     }
   });
+}
+
+/** Turns a connectNative failure into a diagnostic state. */
+function classifyConnectError(error) {
+  const text = String(error && error.message ? error.message : error);
+
+  // Chrome reports the same "host not found" error both when nothing is
+  // registered and when the registration does not allow this extension ID.
+  // Do not pretend to tell them apart.
+  if (/not found|Specified native messaging host/i.test(text)) {
+    return {
+      state: 'not-registered',
+      message: 'ネイティブホストが登録されていないか、この拡張 ID 用に登録されていません。'
+    };
+  }
+  if (/forbidden|Access to the specified native messaging host is forbidden/i.test(text)) {
+    return {
+      state: 'not-registered',
+      message: 'ネイティブホストがこの拡張 ID 用に登録されていません。'
+    };
+  }
+  return {
+    state: 'error',
+    message: 'ネイティブホストに接続できません: ' + text
+  };
+}
+
+/** The setup steps shown when the host is not usable. */
+function setupGuidance(state) {
+  switch (state) {
+    case 'not-registered':
+      return 'セットアップしてください。ストア版は installer\\setup.ps1、開発版は ' +
+        'installer\\install.ps1 -ExtensionId <拡張ID> を実行します。手順は docs/setup.md にあります。';
+    case 'git-missing':
+      return 'Git for Windows をインストールし、PATH に追加してから拡張を再確認してください。';
+    case 'unresponsive':
+      return 'ホストの実行ファイルが壊れている可能性があります。installer\\setup.ps1 -Repair で再インストールしてください。';
+    default:
+      return '';
+  }
 }
 
 // ---------------------------------------------------------------- messaging
@@ -463,7 +537,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
 
     case 'gbc:checkHost':
-      checkHost().then(sendResponse);
+      checkHost().then((result) => {
+        // Attach the setup steps the popup should show for this state.
+        sendResponse({ ...result, setup: setupGuidance(result.state) });
+      });
       return true;
 
     case 'gbc:selectionChanged':

@@ -65,7 +65,15 @@ func serve(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error
 
 		switch req.Type {
 		case protocol.TypePing:
-			if err := writer.Write(protocol.Pong{Type: protocol.TypePong, Version: version}); err != nil {
+			// Report what the host can do so the popup can diagnose setup
+			// problems instead of guessing. Probing does not need the root.
+			probe := &clone.Runner{Log: stderr}
+			pong := protocol.Pong{
+				Type:         protocol.TypePong,
+				Version:      version,
+				Capabilities: probe.Capabilities(ctx),
+			}
+			if err := writer.Write(pong); err != nil {
 				return err
 			}
 		case protocol.TypeClone:
@@ -112,7 +120,16 @@ func handleClone(ctx context.Context, writer *protocol.Writer, stderr io.Writer,
 		return
 	}
 
-	runner := &clone.Runner{Root: root, Log: stderr}
+	layout := req.Layout
+	if layout == "" {
+		layout = protocol.LayoutFlat
+	}
+	if layout != protocol.LayoutFlat && layout != protocol.LayoutOwner {
+		fail("invalid_layout", fmt.Sprintf("保存先レイアウトが不正です: %q", req.Layout))
+		return
+	}
+
+	runner := &clone.Runner{Root: root, Layout: layout, Log: stderr}
 	if err := runner.CheckTools(); err != nil {
 		fail("git_missing", err.Error())
 		return
@@ -138,6 +155,8 @@ func handleClone(ctx context.Context, writer *protocol.Writer, stderr io.Writer,
 			summary.Success++
 		case protocol.StatusSkipped:
 			summary.Skipped++
+		case protocol.StatusConflict:
+			summary.Conflict++
 		default:
 			summary.Failed++
 		}

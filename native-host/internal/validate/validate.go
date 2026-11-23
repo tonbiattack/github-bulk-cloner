@@ -156,12 +156,43 @@ func Contains(root, target string) bool {
 
 // Target returns the clone destination for owner/name.
 //
-// The layout is flat: <root>/<name>. This tool is used for the user's own
-// repositories, so the owner segment only adds a directory level. The owner is
-// still validated, because it identifies which repository to fetch.
+// The default layout is flat: <root>/<name>. This tool is mainly used for the
+// user's own repositories, so the owner segment would only add a directory
+// level. The owner layout (<root>/<owner>/<name>) is available when
+// same-named repositories from different owners must coexist.
+//
+// The owner is always validated, because it identifies which repository to
+// fetch.
 func Target(rootReal, owner, name string) (string, error) {
-	_ = owner // validated by RepoSpec; not part of the path
-	target := filepath.Join(rootReal, name)
+	return TargetWithLayout(rootReal, owner, name, "flat")
+}
+
+// TargetWithLayout is Target with an explicit layout:
+// "flat" for <root>/<name>, "owner" for <root>/<owner>/<name>.
+func TargetWithLayout(rootReal, owner, name, layout string) (string, error) {
+	var target string
+	switch layout {
+	case "", "flat":
+		target = filepath.Join(rootReal, name)
+	case "owner":
+		ownerDir := filepath.Join(rootReal, owner)
+		if err := os.MkdirAll(ownerDir, 0o755); err != nil {
+			return "", fmt.Errorf("cannot create owner directory: %w", err)
+		}
+		// Resolve the owner directory so a junction planted there cannot move
+		// the clone outside the root.
+		ownerReal, err := filepath.EvalSymlinks(ownerDir)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve owner directory: %w", err)
+		}
+		if !Contains(rootReal, ownerReal) {
+			return "", fmt.Errorf("owner directory %q resolves outside the clone root", ownerDir)
+		}
+		target = filepath.Join(ownerReal, name)
+	default:
+		return "", fmt.Errorf("unknown layout %q", layout)
+	}
+
 	if !Contains(rootReal, target) {
 		return "", fmt.Errorf("clone target %q resolves outside the clone root", target)
 	}
@@ -172,4 +203,80 @@ func Target(rootReal, owner, name string) (string, error) {
 func IsGitRepo(dir string) bool {
 	_, err := os.Lstat(filepath.Join(dir, ".git"))
 	return err == nil
+}
+
+// ParseGitHubRemote extracts owner/repo from a GitHub remote URL.
+//
+// It accepts the forms git writes on clone:
+//
+//	https://github.com/<owner>/<repo>.git
+//	git@github.com:<owner>/<repo>.git
+//	ssh://git@github.com/<owner>/<repo>.git
+//
+// Anything not pointing at github.com returns ok=false, so callers never
+// mistake an unrelated remote for a match.
+func ParseGitHubRemote(remote string) (spec string, ok bool) {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return "", false
+	}
+	remote = strings.TrimSuffix(remote, "/")
+	remote = strings.TrimSuffix(remote, ".git")
+
+	var rest string
+	switch {
+	case strings.Contains(remote, "://"):
+		// scheme://[user@]host[:port]/path
+		_, after, found := strings.Cut(remote, "://")
+		if !found {
+			return "", false
+		}
+		// Strip any userinfo.
+		if at := strings.Index(after, "@"); at >= 0 {
+			after = after[at+1:]
+		}
+		host, path, found := strings.Cut(after, "/")
+		if !found || !isGitHubHost(host) {
+			return "", false
+		}
+		rest = path
+	default:
+		// scp-like syntax: [user@]host:path
+		colon := strings.Index(remote, ":")
+		if colon < 0 {
+			return "", false
+		}
+		hostPart := remote[:colon]
+		if at := strings.Index(hostPart, "@"); at >= 0 {
+			hostPart = hostPart[at+1:]
+		}
+		if !isGitHubHost(hostPart) {
+			return "", false
+		}
+		rest = remote[colon+1:]
+	}
+
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 {
+		return "", false
+	}
+	owner, name := parts[0], parts[1]
+	if _, _, err := RepoSpec(owner + "/" + name); err != nil {
+		return "", false
+	}
+	return owner + "/" + name, true
+}
+
+// isGitHubHost reports whether host names github.com, ignoring a port.
+func isGitHubHost(host string) bool {
+	if idx := strings.LastIndex(host, ":"); idx >= 0 {
+		host = host[:idx]
+	}
+	return strings.EqualFold(host, "github.com") || strings.EqualFold(host, "www.github.com")
+}
+
+// SameRepo reports whether two owner/repo specs name the same repository.
+// GitHub treats owner and repository names case-insensitively.
+func SameRepo(a, b string) bool {
+	return strings.EqualFold(a, b)
 }

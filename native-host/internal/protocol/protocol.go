@@ -36,6 +36,21 @@ const (
 	StatusSuccess = "success"
 	StatusSkipped = "skipped"
 	StatusFailed  = "failed"
+	// StatusConflict means the destination folder already holds a different
+	// repository. It is reported separately from skipped so the user is not
+	// told that their repository is already cloned.
+	StatusConflict = "conflict"
+)
+
+// Layout selects how the clone destination is derived from owner/repo.
+const (
+	// LayoutFlat puts every repository directly under the root:
+	// <root>/<repo>. This is the default and matches existing installs.
+	LayoutFlat = "flat"
+	// LayoutOwner nests repositories under their owner:
+	// <root>/<owner>/<repo>. Use it when same-named repositories from
+	// different owners must coexist.
+	LayoutOwner = "owner"
 )
 
 // Request is an inbound message. Only the fields relevant to Type are used.
@@ -44,6 +59,8 @@ type Request struct {
 	RequestID    string   `json:"requestId"`
 	Root         string   `json:"root"`
 	Repositories []string `json:"repositories"`
+	// Layout is LayoutFlat or LayoutOwner. Empty means LayoutFlat.
+	Layout string `json:"layout,omitempty"`
 }
 
 // Result reports the outcome for a single repository.
@@ -56,13 +73,17 @@ type Result struct {
 	Message         string `json:"message,omitempty"`
 	Method          string `json:"method,omitempty"`
 	ExistingGitRepo *bool  `json:"existingGitRepo,omitempty"`
+	// ExistingRepository is the owner/repo found at the destination when it
+	// differs from the requested one. Only set for StatusConflict.
+	ExistingRepository string `json:"existingRepository,omitempty"`
 }
 
 // Summary counts the outcomes of a finished request.
 type Summary struct {
-	Success int `json:"success"`
-	Skipped int `json:"skipped"`
-	Failed  int `json:"failed"`
+	Success  int `json:"success"`
+	Skipped  int `json:"skipped"`
+	Failed   int `json:"failed"`
+	Conflict int `json:"conflict,omitempty"`
 }
 
 // Done terminates a request.
@@ -80,10 +101,29 @@ type Error struct {
 	Message   string `json:"message"`
 }
 
-// Pong answers a ping, used by the installer to prove the host is reachable.
+// Pong answers a ping, used by the installer and the popup to prove the host
+// is reachable and to report what it can do.
 type Pong struct {
-	Type    string `json:"type"`
-	Version string `json:"version"`
+	Type    string       `json:"type"`
+	Version string       `json:"version"`
+	// Capabilities reports what this host found on the machine. These are
+	// facts the browser cannot observe on its own.
+	Capabilities Capabilities `json:"capabilities"`
+}
+
+// Capabilities describes the tooling the host could use.
+type Capabilities struct {
+	// GitAvailable is true when git can be located.
+	GitAvailable bool `json:"gitAvailable"`
+	// GhAvailable is true when the gh CLI can be located.
+	GhAvailable bool `json:"ghAvailable"`
+	// GhAuthenticated is true when gh auth status succeeds. It only has
+	// meaning when GhAvailable is true.
+	GhAuthenticated bool `json:"ghAuthenticated"`
+	// OS is the host's operating system, for support diagnostics.
+	OS string `json:"os"`
+	// Arch is the host's architecture, for support diagnostics.
+	Arch string `json:"arch"`
 }
 
 // ErrMessageTooLarge is returned when a frame exceeds MaxMessageSize.

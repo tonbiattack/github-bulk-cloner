@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -35,6 +37,9 @@ var credentialPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+
 type Runner struct {
 	// Root is the resolved absolute clone root.
 	Root string
+	// Layout is "flat" (<root>/<repo>) or "owner" (<root>/<owner>/<repo>).
+	// Empty means flat.
+	Layout string
 	// Timeout bounds each repository. Zero means DefaultTimeout.
 	Timeout time.Duration
 	// Log receives diagnostics. It must not be stdout.
@@ -53,6 +58,37 @@ func (r *Runner) CheckTools() error {
 		return ErrGitMissing
 	}
 	return nil
+}
+
+// Capabilities reports the tooling available on this machine.
+//
+// These are facts only the host can observe; the extension must not guess
+// them. The probe is best-effort: a missing gh is not an error.
+func (r *Runner) Capabilities(ctx context.Context) protocol.Capabilities {
+	caps := protocol.Capabilities{
+		OS:   runtime.GOOS,
+		Arch: runtime.GOARCH,
+	}
+
+	if _, err := r.git(); err == nil {
+		caps.GitAvailable = true
+	}
+
+	ghPath, err := r.gh()
+	if err != nil {
+		return caps
+	}
+	caps.GhAvailable = true
+
+	// gh auth status talks to the local config only, but bound it anyway.
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(probeCtx, ghPath, "auth", "status")
+	cmd.Env = toolEnv()
+	if cmd.Run() == nil {
+		caps.GhAuthenticated = true
+	}
+	return caps
 }
 
 func (r *Runner) git() (string, error) { return resolveTool(r.GitPath, "git") }
@@ -107,7 +143,7 @@ func (r *Runner) Clone(ctx context.Context, requestID, spec string) protocol.Res
 		return result
 	}
 
-	target, err := validate.Target(r.Root, owner, name)
+	target, err := validate.TargetWithLayout(r.Root, owner, name, r.Layout)
 	if err != nil {
 		result.Status = protocol.StatusFailed
 		result.Message = sanitize(err.Error())
@@ -117,15 +153,7 @@ func (r *Runner) Clone(ctx context.Context, requestID, spec string) protocol.Res
 
 	// Never overwrite, delete, or pull an existing directory.
 	if _, statErr := os.Lstat(target); statErr == nil {
-		existing := validate.IsGitRepo(target)
-		result.Status = protocol.StatusSkipped
-		result.ExistingGitRepo = &existing
-		if existing {
-			result.Message = "既存の Git リポジトリのためスキップしました"
-		} else {
-			result.Message = "既存のディレクトリのためスキップしました"
-		}
-		return result
+		return r.existingOutcome(ctx, spec, target, result)
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		result.Status = protocol.StatusFailed
 		result.Message = sanitize(fmt.Sprintf("保存先を確認できません: %v", statErr))
@@ -159,6 +187,67 @@ func (r *Runner) Clone(ctx context.Context, requestID, spec string) protocol.Res
 	result.Status = protocol.StatusFailed
 	result.Message = sanitize(describe(cloneErr))
 	return result
+}
+
+// existingOutcome decides what to report when the destination already exists.
+//
+// Nothing on disk is modified. The point is to avoid telling the user that
+// their repository is already cloned when the folder actually holds a
+// different repository: with the flat layout, ownerA/tool and ownerB/tool
+// resolve to the same folder, so the remote is the only way to tell them
+// apart.
+func (r *Runner) existingOutcome(ctx context.Context, spec, target string, result protocol.Result) protocol.Result {
+	isRepo := validate.IsGitRepo(target)
+	result.ExistingGitRepo = &isRepo
+
+	if !isRepo {
+		result.Status = protocol.StatusSkipped
+		result.Message = "既存のディレクトリのためスキップしました"
+		return result
+	}
+
+	existing, ok := r.remoteSpec(ctx, target)
+	if !ok {
+		// The remote is missing or not on GitHub, so the origin cannot be
+		// confirmed. Skip without claiming it matches.
+		result.Status = protocol.StatusSkipped
+		result.Message = "既存の Git リポジトリのためスキップしました（リモートを確認できませんでした）"
+		return result
+	}
+
+	if validate.SameRepo(existing, spec) {
+		result.Status = protocol.StatusSkipped
+		result.Message = "既に clone 済みのためスキップしました"
+		return result
+	}
+
+	// A different repository already occupies the destination.
+	result.Status = protocol.StatusConflict
+	result.ExistingRepository = existing
+	result.Message = sanitize(fmt.Sprintf(
+		"保存先には別のリポジトリ %s があります。%s は clone していません。保存先を変更するか、所有者ごとのフォルダに保存する設定にしてください",
+		existing, spec))
+	return result
+}
+
+// remoteSpec returns the owner/repo of the origin remote of the working tree
+// at dir, or ok=false when it cannot be determined.
+func (r *Runner) remoteSpec(ctx context.Context, dir string) (string, bool) {
+	gitPath, err := r.git()
+	if err != nil {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, gitPath, "remote", "get-url", "origin")
+	cmd.Dir = dir
+	cmd.Env = toolEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return validate.ParseGitHubRemote(string(out))
 }
 
 // method picks gh for repositories the user cannot read anonymously.
@@ -330,6 +419,13 @@ func (r *Runner) TargetPath(spec string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return validate.Target(r.Root, owner, name)
+	layout := r.Layout
+	if layout == "" {
+		layout = protocol.LayoutFlat
+	}
+	if layout == protocol.LayoutOwner {
+		return filepath.Join(r.Root, owner, name), nil
+	}
+	return filepath.Join(r.Root, name), nil
 }
 

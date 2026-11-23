@@ -1,0 +1,159 @@
+name: release
+
+# Builds the Windows native messaging host and publishes it with the
+# extension package whenever a version tag is pushed.
+#
+# Users install the released .exe, so they do not need Go on their machine.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (for example 0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: native-host/go.sum
+
+      # Derive the version from the tag, or from the manual input.
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $ref = '${{ github.ref_name }}'
+          if ($ref -like 'v*') {
+            $version = $ref.TrimStart('v')
+          } elseif ('${{ github.event.inputs.version }}' -ne '') {
+            $version = '${{ github.event.inputs.version }}'
+          } else {
+            throw 'Cannot determine the version. Push a v* tag or set the version input.'
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "version: $version"
+
+      - name: Test
+        working-directory: native-host
+        run: |
+          go vet ./...
+          go test ./... -short
+
+      - name: Build the native host
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $out = 'dist/host'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+
+          # amd64 is the only target the MVP claims to support.
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $env:CGO_ENABLED = '0'
+          go build -trimpath -ldflags "-s -w -X main.version=$version" `
+            -o "$out/github-bulk-cloner-host-windows-amd64.exe" ./cmd/host
+          if ($LASTEXITCODE -ne 0) { throw "go build failed ($LASTEXITCODE)" }
+
+          # The installer expects the stable name alongside the versioned one.
+          Copy-Item "$out/github-bulk-cloner-host-windows-amd64.exe" `
+                    "$out/github-bulk-cloner-host.exe"
+
+          $hash = (Get-FileHash "$out/github-bulk-cloner-host-windows-amd64.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  github-bulk-cloner-host-windows-amd64.exe" |
+            Set-Content -Path "$out/SHA256SUMS.txt" -Encoding ascii
+          Write-Host "sha256: $hash"
+        working-directory: native-host
+
+      - name: Write the release notes
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $hash = (Get-Content 'native-host/dist/host/SHA256SUMS.txt') -split '\s+' | Select-Object -First 1
+
+          $notes = @"
+          # GitHub Bulk Cloner v$version
+
+          Windows 用ネイティブホストのビルド済みバイナリです。**Go は不要**になりました。
+
+          ## 必要なもの
+
+          - Windows 10 / 11 (x64)
+          - Git for Windows
+          - GitHub CLI（Private リポジトリを使う場合のみ）
+          - Google Chrome 102 以降
+
+          ## インストール
+
+          1. Chrome に拡張を導入する
+          2. このリリースの ``github-bulk-cloner-host.exe`` をダウンロードする
+          3. PowerShell でリポジトリのインストーラを実行する
+
+          ``````powershell
+          .\installer\setup.ps1
+          ``````
+
+          ストア版は拡張 ID が固定なので、``-ExtensionId`` の指定は不要です。
+
+          ## 同梱物
+
+          | ファイル | 用途 |
+          | --- | --- |
+          | ``github-bulk-cloner-host-windows-amd64.exe`` | ネイティブホスト本体 |
+          | ``github-bulk-cloner-host.exe`` | インストーラが参照する安定名（同一バイナリ） |
+          | ``SHA256SUMS.txt`` | 改ざん検知用のチェックサム |
+
+          ## 検証
+
+          ダウンロードしたバイナリのチェックサムを確認できます。
+
+          ``````powershell
+          Get-FileHash .\github-bulk-cloner-host-windows-amd64.exe -Algorithm SHA256
+          # $hash
+          ``````
+
+          ## 出所
+
+          このバイナリは GitHub Actions（``.github/workflows/release.yml``）が
+          ``native-host/`` からビルドしたものです。ローカルで同じものを作るには:
+
+          ``````powershell
+          cd native-host
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o github-bulk-cloner-host.exe ./cmd/host
+          ``````
+          "@
+
+          $notes | Set-Content -Path 'release-notes.md' -Encoding utf8
+
+      - name: Package the extension
+        shell: pwsh
+        run: .\tools\package-extension.ps1
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            native-host/dist/host/github-bulk-cloner-host-windows-amd64.exe
+            native-host/dist/host/github-bulk-cloner-host.exe
+            native-host/dist/host/SHA256SUMS.txt
+            dist/github-bulk-cloner-${{ steps.version.outputs.version }}.zip
