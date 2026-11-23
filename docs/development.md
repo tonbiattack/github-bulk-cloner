@@ -10,6 +10,7 @@ extension/                 Chrome 拡張（Manifest V3）
   content/content.js       候補抽出とチェックボックス
   content/content.css
   popup/                   一覧・保存先・実行結果
+  icons/                   16 / 32 / 48 / 128 px のアイコン
   test/                    Node テストと Chrome 実機テスト
 native-host/               Go ネイティブホスト
   cmd/host/main.go         プロトコルループ
@@ -17,7 +18,28 @@ native-host/               Go ネイティブホスト
   internal/validate/       owner/repo とパスの検証
   internal/clone/          git / gh の実行
 installer/                 ビルド・登録・解除・疎通確認
+tools/                     アイコン生成などの開発用スクリプト
 docs/                      手順書
+```
+
+## アイコン
+
+アイコンは `tools/make-icons.ps1` で生成します。手で描き直すのではなく、このスクリプトを編集して再生成してください。
+
+```powershell
+.\tools\make-icons.ps1
+```
+
+- 512×512 の座標系で定義し、各サイズの 4 倍で描いてから高品質に縮小するため、16px でも判読できる
+- 意匠は「下向き矢印がトレイに入る」形で、clone 先フォルダへの取り込みを表す
+- 背景は GitHub の緑のグラデーション。明暗どちらのツールバーでも視認できる
+- `manifest.json` の `icons` と `action.default_icon` の両方に登録する
+- ポップアップのヘッダーは `icons/icon-32.png` を表示する
+
+サイズを変える場合:
+
+```powershell
+.\tools\make-icons.ps1 -Sizes 16,32,48,128,256
 ```
 
 ## 設計上の要点
