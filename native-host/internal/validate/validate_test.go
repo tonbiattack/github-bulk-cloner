@@ -2,6 +2,7 @@ package validate
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -174,6 +175,23 @@ func TestTargetStaysUnderRoot(t *testing.T) {
 	}
 }
 
+// makeLinkTo creates a link at link pointing at target. It prefers a
+// directory junction, which Windows allows without administrator rights, and
+// falls back to a symlink.
+func makeLinkTo(t *testing.T, target, link string) {
+	t.Helper()
+
+	if err := os.Symlink(target, link); err == nil {
+		return
+	}
+
+	// mklink /J does not need SeCreateSymbolicLinkPrivilege.
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, target)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("cannot create a junction or symlink: %v (%s)", err, out)
+	}
+}
+
 // TestTargetRejectsEscapingRepoDirectory plants a directory junction where the
 // repository directory would go and checks that the escape is refused.
 func TestTargetRejectsEscapingRepoDirectory(t *testing.T) {
@@ -190,19 +208,39 @@ func TestTargetRejectsEscapingRepoDirectory(t *testing.T) {
 
 	// A junction at <root>/repo pointing outside the root.
 	link := filepath.Join(real, "repo")
-	if err := os.Symlink(outside, link); err != nil {
-		t.Skipf("cannot create symlink (needs privilege): %v", err)
+	makeLinkTo(t, outside, link)
+
+	if _, err := Target(real, "owner", "repo"); err == nil {
+		t.Fatal("Target should refuse a destination that resolves outside the root")
 	}
+}
+
+// TestTargetAllowsLinkInsideRoot makes sure the containment check does not
+// reject a destination that is a link but still stays under the root.
+func TestTargetAllowsLinkInsideRoot(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junction creation is Windows-specific")
+	}
+
+	root := t.TempDir()
+	real, err := Root(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inner := filepath.Join(real, "actual")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(real, "repo")
+	makeLinkTo(t, inner, link)
 
 	target, err := Target(real, "owner", "repo")
 	if err != nil {
-		// Refusing outright is also acceptable.
-		return
+		t.Fatalf("a link inside the root should be allowed: %v", err)
 	}
-	// If a path is returned it must still resolve inside the root.
-	resolved, err := filepath.EvalSymlinks(target)
-	if err == nil && !Contains(real, resolved) {
-		t.Fatalf("Target returned %q which resolves outside the root to %q", target, resolved)
+	if !Contains(real, target) {
+		t.Fatalf("target %q escaped root %q", target, real)
 	}
 }
 

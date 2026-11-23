@@ -131,7 +131,7 @@ func Root(root string) (string, error) {
 		return "", fmt.Errorf("root %q is not accessible: %w", cleaned, err)
 	}
 
-	real, err := filepath.EvalSymlinks(cleaned)
+	real, err := RealPath(cleaned)
 	if err != nil {
 		return "", fmt.Errorf("root %q cannot be resolved: %w", cleaned, err)
 	}
@@ -152,6 +152,59 @@ func Contains(root, target string) bool {
 		return false
 	}
 	return !filepath.IsAbs(rel)
+}
+
+// RealPath resolves every link in path, including NTFS junctions.
+//
+// filepath.EvalSymlinks resolves symlinks but leaves a directory junction
+// pointing at its original path, so a junction planted inside the clone root
+// would look contained. This walks the components and follows whichever
+// links it finds, so containment checks cannot be bypassed that way.
+func RealPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	// EvalSymlinks also normalises 8.3 short names and case on Windows.
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return followLinks(resolved, 0)
+}
+
+// followLinks follows junctions and any remaining links in path.
+func followLinks(path string, depth int) (string, error) {
+	// Bounded so a link cycle cannot hang the host.
+	if depth > 40 {
+		return "", fmt.Errorf("too many links while resolving %q", path)
+	}
+
+	volume := filepath.VolumeName(path)
+	rest := strings.TrimPrefix(path, volume)
+	parts := strings.Split(rest, string(filepath.Separator))
+
+	current := volume + string(filepath.Separator)
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+
+		linkTarget, err := os.Readlink(current)
+		if err != nil {
+			// Not a link, or a link this process cannot read.
+			continue
+		}
+		if !filepath.IsAbs(linkTarget) {
+			linkTarget = filepath.Join(filepath.Dir(current), linkTarget)
+		}
+		if i+1 < len(parts) {
+			linkTarget = filepath.Join(linkTarget, filepath.Join(parts[i+1:]...))
+		}
+		return followLinks(filepath.Clean(linkTarget), depth+1)
+	}
+	return path, nil
 }
 
 // Target returns the clone destination for owner/name.
@@ -181,7 +234,7 @@ func TargetWithLayout(rootReal, owner, name, layout string) (string, error) {
 		}
 		// Resolve the owner directory so a junction planted there cannot move
 		// the clone outside the root.
-		ownerReal, err := filepath.EvalSymlinks(ownerDir)
+		ownerReal, err := RealPath(ownerDir)
 		if err != nil {
 			return "", fmt.Errorf("cannot resolve owner directory: %w", err)
 		}
@@ -196,6 +249,20 @@ func TargetWithLayout(rootReal, owner, name, layout string) (string, error) {
 	if !Contains(rootReal, target) {
 		return "", fmt.Errorf("clone target %q resolves outside the clone root", target)
 	}
+
+	// If the destination already exists, following it must still stay inside
+	// the root. A junction or symlink planted at the target would otherwise
+	// redirect a write outside the configured folder.
+	if _, err := os.Lstat(target); err == nil {
+		resolved, resolveErr := RealPath(target)
+		if resolveErr != nil {
+			return "", fmt.Errorf("cannot resolve clone target %q: %w", target, resolveErr)
+		}
+		if !Contains(rootReal, resolved) {
+			return "", fmt.Errorf("clone target %q resolves outside the clone root", target)
+		}
+	}
+
 	return target, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tonbiattack/github-bulk-cloner/native-host/internal/protocol"
+	"github.com/tonbiattack/github-bulk-cloner/native-host/internal/validate"
 )
 
 // makeRepoWithRemote creates a Git repository whose origin points at spec.
@@ -84,7 +85,13 @@ func TestServeRejectsInvalidLayout(t *testing.T) {
 
 func TestServeOwnerLayoutSeparatesSameName(t *testing.T) {
 	root := t.TempDir()
-	makeRepoWithRemote(t, filepath.Join(root, "ownerA", "tool"), "ownerA/tool")
+	// Use the resolved root, because the host resolves it and the raw temp
+	// path can differ (8.3 short names on CI runners).
+	resolved, err := validate.Root(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeRepoWithRemote(t, filepath.Join(resolved, "ownerA", "tool"), "ownerA/tool")
 
 	msgs := runServe(t, protocol.Request{
 		Type:         protocol.TypeClone,
@@ -99,10 +106,15 @@ func TestServeOwnerLayoutSeparatesSameName(t *testing.T) {
 	if msgs[0]["status"] != protocol.StatusSkipped {
 		t.Fatalf("status = %v, want skipped", msgs[0]["status"])
 	}
-	// The path must be the owner-nested one.
-	wantPath := filepath.Join(root, "ownerA", "tool")
-	if msgs[0]["path"] != wantPath {
-		t.Errorf("path = %v, want %v", msgs[0]["path"], wantPath)
+	// Compare the tail of the path so the assertion does not depend on how the
+	// temp directory is spelled, and require the owner segment to be present.
+	gotPath, _ := msgs[0]["path"].(string)
+	wantTail := filepath.Join("ownerA", "tool")
+	if !strings.HasSuffix(gotPath, wantTail) {
+		t.Errorf("path = %v, want it to end with %v", gotPath, wantTail)
+	}
+	if !validate.Contains(resolved, gotPath) {
+		t.Errorf("path = %v, want it under %v", gotPath, resolved)
 	}
 }
 
