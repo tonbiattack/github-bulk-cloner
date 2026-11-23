@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "GitHub Bulk Cloner",
+  "version": "0.1.0",
+  "description": "GitHub のリポジトリ一覧から選んだリポジトリを、Windows の指定フォルダへまとめて clone します。",
+  "minimum_chrome_version": "102",
+  "permissions": ["storage", "nativeMessaging", "tabs"],
+  "host_permissions": ["https://github.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "GitHub Bulk Cloner",
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["lib/repo-url.js", "content/content.js"],
+      "css": ["content/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

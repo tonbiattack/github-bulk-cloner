@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>GitHub Bulk Cloner</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="header">
+    <h1>GitHub Bulk Cloner</h1>
+    <span id="host-status" class="badge badge-unknown" title="ネイティブホストの状態">未確認</span>
+  </header>
+
+  <section class="section">
+    <label class="label" for="root-input">保存先フォルダ</label>
+    <div class="row">
+      <input id="root-input" type="text" spellcheck="false" autocomplete="off"
+             placeholder="C:\apps">
+      <button id="save-root" type="button" class="secondary">保存</button>
+    </div>
+    <p id="root-hint" class="hint">各リポジトリは &lt;保存先&gt;\&lt;owner&gt;\&lt;repo&gt; に clone されます。</p>
+  </section>
+
+  <section class="section">
+    <div class="row row-between">
+      <span class="label">選択中のリポジトリ</span>
+      <span id="selection-count" class="count">0 件</span>
+    </div>
+    <ul id="selection-list" class="list" aria-live="polite"></ul>
+    <p id="selection-empty" class="hint">GitHub のリポジトリ一覧ページでチェックを付けてください。</p>
+    <div class="row">
+      <button id="refresh" type="button" class="secondary">再読み込み</button>
+      <button id="clear" type="button" class="secondary">全解除</button>
+    </div>
+  </section>
+
+  <section class="section">
+    <button id="clone" type="button" class="primary" disabled>Clone selected</button>
+    <p id="clone-hint" class="hint"></p>
+  </section>
+
+  <section class="section">
+    <div class="row row-between">
+      <span class="label">実行結果</span>
+      <span id="progress" class="count"></span>
+    </div>
+    <div id="summary" class="summary" hidden></div>
+    <ul id="result-list" class="list result-list" aria-live="polite"></ul>
+    <p id="result-empty" class="hint">まだ実行していません。</p>
+  </section>
+
+  <script src="../lib/repo-url.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

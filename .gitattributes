@@ -1,0 +1,19 @@
+# Normalise line endings in the repository; check out native endings per OS.
+* text=auto
+
+# PowerShell scripts must keep CRLF for Windows PowerShell 5.1 compatibility.
+*.ps1 text eol=crlf
+
+# Go and JavaScript sources are fine with LF everywhere.
+*.go text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.yml text eol=lf
+
+# Binary assets must never be converted.
+*.png binary
+*.ico binary
+*.exe binary
