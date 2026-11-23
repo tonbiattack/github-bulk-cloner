@@ -82,6 +82,18 @@ GitHub は SPA で頻繁に再描画されます。content script は次を守�
 
 フォークの行には「Forked from `<owner>/<repo>`」というリンクも含まれます。行単位で主リンクだけを採用することで、上流リポジトリを誤って候補にしないようにしています。
 
+### 拡張の再読み込みへの追従
+
+拡張を再読み込み・削除すると、**既に開いているページの content script は孤立**します。その状態で `chrome.runtime` を呼ぶと `Extension context invalidated` が同期的に投げられ、`.catch()` では捕まえられません。
+
+そのため content script は次を行います。
+
+- `isContextValid()` で `chrome.runtime.id` の有無を確認してから呼ぶ
+- `sendMessageSafely()` が同期例外も含めて握りつぶし、無効化を検知する
+- 無効化を検知したら `teardown()` でチェックボックスとツールバーを撤去し、以降のスキャンを止める
+
+これにより、再読み込み後に古いタブが残っていてもエラーが出ず、死んだ UI も残りません。ページを再読み込みすれば新しい content script が入ります。
+
 ## テスト
 
 ### Go
@@ -159,6 +171,20 @@ node extension/test/cdp-autoclone-e2e.js <32文字> (Join-Path $env:TEMP 'gbc-au
 - clone 先が `<root>/<repo>` で、owner フォルダが作られない
 - 行に状態バッジが出て、最終結果（clone 済み / 既にあります / 失敗）に変わる
 - 既にあるリポジトリを再チェックすると `skipped` になる
+
+拡張の再読み込みで content script が孤立したときの挙動は別スクリプトで確認します。
+
+```powershell
+$env:CDP_PORT = '9339'
+node extension/test/cdp-invalidate-e2e.js <32文字>
+```
+
+`cdp-invalidate-e2e.js` が確認する内容:
+
+- ページを開いたまま拡張を再読み込みしても `Extension context invalidated` が出ない
+- 孤立したチェックボックスとツールバーが撤去される
+
+このテストは修正前のコードに対して実行すると失敗する（例外が出て UI も残る）ため、回帰検出に使えます。
 
 ### ホスト単体
 

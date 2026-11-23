@@ -41,6 +41,57 @@
 
   let scanScheduled = false;
   let observer = null;
+  /** Set once the extension has been reloaded or removed under this page. */
+  let contextInvalidated = false;
+
+  // ------------------------------------------------------- context validity
+
+  /**
+   * Reports whether this content script can still talk to the extension.
+   *
+   * Reloading or removing the extension orphans the content scripts already
+   * running in open tabs. Their chrome.runtime calls then throw
+   * "Extension context invalidated", so every call is guarded by this check.
+   */
+  function isContextValid() {
+    if (contextInvalidated) return false;
+    try {
+      return Boolean(chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Stops all work and removes the injected UI once the extension is gone.
+   *
+   * Without this the page keeps a dead observer and dead checkboxes that can
+   * never report anything.
+   */
+  function handleInvalidatedContext() {
+    if (contextInvalidated) return;
+    contextInvalidated = true;
+    teardown();
+  }
+
+  /**
+   * Sends a message to the extension, tolerating an invalidated context.
+   *
+   * chrome.runtime.sendMessage throws synchronously when the context is gone,
+   * so a promise .catch() alone is not enough.
+   */
+  function sendMessageSafely(message) {
+    if (!isContextValid()) {
+      handleInvalidatedContext();
+      return Promise.resolve(null);
+    }
+    try {
+      return chrome.runtime.sendMessage(message).catch(() => null);
+    } catch {
+      handleInvalidatedContext();
+      return Promise.resolve(null);
+    }
+  }
 
   // ---------------------------------------------------------------- scanning
 
@@ -155,13 +206,17 @@
     setRowStatus(candidate.spec, 'working', 'clone 中…');
     pendingClones.set(key, true);
 
-    chrome.runtime.sendMessage({
+    sendMessageSafely({
       type: 'gbc:startClone',
       repositories: [candidate.spec]
     }).then((result) => {
       pendingClones.delete(key);
       if (!result) {
-        setRowStatus(candidate.spec, 'failed', 'clone できませんでした');
+        // A null result means the extension context is gone; the row is
+        // already cleaned up by handleInvalidatedContext.
+        if (!contextInvalidated) {
+          setRowStatus(candidate.spec, 'failed', 'clone できませんでした');
+        }
         return;
       }
       if (result.error) {
@@ -212,6 +267,12 @@
   /** Adds checkboxes for any newly seen candidates. */
   function scan() {
     scanScheduled = false;
+
+    // Stop for good once the extension has been reloaded or removed.
+    if (!isContextValid()) {
+      handleInvalidatedContext();
+      return;
+    }
 
     if (!RepoUrl.isSupportedPage(location.href)) {
       teardown();
@@ -380,10 +441,10 @@
 
   function notifySelectionChanged() {
     // The popup may be closed; a failed send is expected and harmless.
-    chrome.runtime.sendMessage({
+    sendMessageSafely({
       type: 'gbc:selectionChanged',
       selected: selectedCandidates().map((candidate) => candidate.spec)
-    }).catch(() => {});
+    });
   }
 
   // -------------------------------------------------------------- lifecycle
@@ -402,6 +463,11 @@
   }
 
   function start() {
+    if (!isContextValid()) {
+      handleInvalidatedContext();
+      return;
+    }
+
     scan();
 
     observer = new MutationObserver(scheduleScan);
@@ -415,49 +481,52 @@
 
   // --------------------------------------------------------------- messaging
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || typeof message.type !== 'string') return false;
+  // Registering a listener on an invalidated context throws, so guard it.
+  if (isContextValid()) {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (!message || typeof message.type !== 'string') return false;
 
-    switch (message.type) {
-      case 'gbc:runUpdate': {
-        // Reflect clone outcomes on the rows as they arrive.
-        const state = message.state;
-        if (state && state.kind === 'clone' && Array.isArray(state.results)) {
-          for (const result of state.results) applyCloneResult(result);
+      switch (message.type) {
+        case 'gbc:runUpdate': {
+          // Reflect clone outcomes on the rows as they arrive.
+          const state = message.state;
+          if (state && state.kind === 'clone' && Array.isArray(state.results)) {
+            for (const result of state.results) applyCloneResult(result);
+          }
+          return false;
         }
-        return false;
+
+        case 'gbc:getState':
+          sendResponse({
+            supported: RepoUrl.isSupportedPage(location.href),
+            candidates: Array.from(entries.values()).map((entry) => ({
+              spec: entry.candidate.spec,
+              url: entry.candidate.url
+            })),
+            selected: selectedCandidates().map((candidate) => candidate.spec)
+          });
+          return false;
+
+        case 'gbc:setSelection':
+          setSelected(Array.isArray(message.selected) ? message.selected : []);
+          sendResponse({ ok: true });
+          return false;
+
+        case 'gbc:selectAll':
+          selectAllRepositories();
+          sendResponse({ ok: true });
+          return false;
+
+        case 'gbc:clearSelection':
+          clearSelection();
+          sendResponse({ ok: true });
+          return false;
+
+        default:
+          return false;
       }
-
-      case 'gbc:getState':
-        sendResponse({
-          supported: RepoUrl.isSupportedPage(location.href),
-          candidates: Array.from(entries.values()).map((entry) => ({
-            spec: entry.candidate.spec,
-            url: entry.candidate.url
-          })),
-          selected: selectedCandidates().map((candidate) => candidate.spec)
-        });
-        return false;
-
-      case 'gbc:setSelection':
-        setSelected(Array.isArray(message.selected) ? message.selected : []);
-        sendResponse({ ok: true });
-        return false;
-
-      case 'gbc:selectAll':
-        selectAllRepositories();
-        sendResponse({ ok: true });
-        return false;
-
-      case 'gbc:clearSelection':
-        clearSelection();
-        sendResponse({ ok: true });
-        return false;
-
-      default:
-        return false;
-    }
-  });
+    });
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });
