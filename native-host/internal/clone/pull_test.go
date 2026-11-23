@@ -195,7 +195,7 @@ func TestPullLeavesDirtyTreeAlone(t *testing.T) {
 
 func TestPullRejectsNonRepository(t *testing.T) {
 	runner, root := newPullRunner(t)
-	dir := filepath.Join(root, "owner", "plain")
+	dir := filepath.Join(root, "plain")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +206,24 @@ func TestPullRejectsNonRepository(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "Git リポジトリではありません") {
 		t.Errorf("message = %q", result.Message)
+	}
+}
+
+// TestPullExplainsMissingRepository covers the common mistake of pointing the
+// saved root at a directory that does not contain the repository.
+func TestPullExplainsMissingRepository(t *testing.T) {
+	runner, root := newPullRunner(t)
+
+	missing := filepath.Join(root, "repo")
+	result := runner.Pull(context.Background(), "r1", "owner/repo", missing)
+	if result.Status != protocol.StatusFailed {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+	if !strings.Contains(result.Message, "保存先にこのリポジトリがありません") {
+		t.Errorf("message should explain the missing repository, got %q", result.Message)
+	}
+	if !strings.Contains(result.Message, missing) {
+		t.Errorf("message should name the path, got %q", result.Message)
 	}
 }
 

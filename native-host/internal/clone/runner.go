@@ -492,7 +492,16 @@ func (r *Runner) Pull(ctx context.Context, requestID, spec, path string) protoco
 	}
 	if !validate.IsGitRepo(path) {
 		result.Status = protocol.StatusFailed
-		result.Message = "Git リポジトリではありません"
+		// Distinguish "not cloned here" from "cloned but not a repository",
+		// because the fix is different: the former means the saved root does
+		// not contain this repository.
+		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+			result.Message = fmt.Sprintf(
+				"保存先にこのリポジトリがありません（%s）。clone するか、保存先フォルダを確認してください",
+				path)
+		} else {
+			result.Message = "Git リポジトリではありません"
+		}
 		return result
 	}
 
