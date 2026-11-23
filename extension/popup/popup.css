@@ -1,0 +1,252 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --border: #d0d7de;
+  --surface: #f6f8fa;
+  --accent: #1f883d;
+  --accent-fg: #ffffff;
+  --success: #1a7f37;
+  --skipped: #9a6700;
+  --failed: #cf222e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --border: #30363d;
+    --surface: #161b22;
+    --success: #3fb950;
+    --skipped: #d29922;
+    --failed: #f85149;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 380px;
+  max-height: 560px;
+  margin: 0;
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.section {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.row-between {
+  justify-content: space-between;
+}
+
+input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+input[type="text"]:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: -1px;
+}
+
+button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  width: 100%;
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+button.primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+button.secondary {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+button.secondary:not(:disabled):hover {
+  filter: brightness(0.96);
+}
+
+.hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hint.error {
+  color: var(--failed);
+}
+
+.count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+
+.list li:last-child {
+  border-bottom: none;
+}
+
+.result-list li {
+  flex-direction: column;
+  gap: 2px;
+  align-items: stretch;
+}
+
+.result-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.result-repo {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.result-path,
+.result-message {
+  color: var(--muted);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.status {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-success {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.status-skipped {
+  color: var(--skipped);
+  background: color-mix(in srgb, var(--skipped) 14%, transparent);
+}
+
+.status-failed {
+  color: var(--failed);
+  background: color-mix(in srgb, var(--failed) 14%, transparent);
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-unknown {
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.badge-ok {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.badge-error {
+  color: var(--failed);
+  background: color-mix(in srgb, var(--failed) 14%, transparent);
+}
+
+.summary {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+
+.summary strong {
+  font-weight: 600;
+}

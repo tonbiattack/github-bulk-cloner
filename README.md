@@ -70,6 +70,16 @@ installer/          # Windows 登録/解除スクリプト
 docs/               # 開発・導入・テスト手順
 ```
 
+## はじめかた
+
+```powershell
+# 1. 拡張を chrome://extensions で読み込み、表示された ID を控える
+# 2. その ID でネイティブホストを登録する
+.\installer\install.ps1 -ExtensionId <32文字の拡張ID>
+```
+
+詳しい手順は [docs/setup.md](docs/setup.md)、設計とテストは [docs/development.md](docs/development.md) を参照。
+
 ## 完了条件（MVP）
 - GitHub のプロフィール上で複数リポジトリを選択できる。
 - 実行ボタンで `C:\apps\<owner>\<repo>` に実際に clone される。
