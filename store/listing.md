@@ -4,6 +4,43 @@ Chrome Web Store の各入力欄にそのまま貼れる文言です。文字数
 
 ---
 
+## GitHub リポジトリの About
+
+ストアとは別に、GitHub リポジトリ側の About も同じ内容で揃えてあります。設定済みの値は次のとおりです。
+
+### Description（350 文字以内）
+
+```text
+GitHub のリポジトリ一覧で欲しいものにチェックを付けるだけで、Windows の指定フォルダへその場で git clone する Chrome 拡張。Go 製ネイティブホストで動作し、保存先フォルダは自動作成します。
+```
+
+### Website
+
+```text
+https://tonbiattack.github.io/github-bulk-cloner/
+```
+
+### Topics
+
+```text
+chrome-extension clone developer-tools git github golang manifest-v3 native-messaging productivity windows
+```
+
+設定コマンド:
+
+```powershell
+gh repo edit tonbiattack/github-bulk-cloner `
+  --description "GitHub のリポジトリ一覧で欲しいものにチェックを付けるだけで、Windows の指定フォルダへその場で git clone する Chrome 拡張。Go 製ネイティブホストで動作し、保存先フォルダは自動作成します。" `
+  --homepage "https://tonbiattack.github.io/github-bulk-cloner/"
+
+gh api -X PUT repos/tonbiattack/github-bulk-cloner/topics --input topics.json
+# topics.json: {"names":["chrome-extension","git","clone","github","golang","native-messaging","windows","manifest-v3","developer-tools","productivity"]}
+```
+
+> ソーシャルプレビュー画像は REST API で設定できません。必要なら GitHub のリポジトリ設定画面から手動でアップロードしてください。
+
+---
+
 ## 名前（45 文字以内）
 
 ```text

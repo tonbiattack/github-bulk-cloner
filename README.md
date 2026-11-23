@@ -9,12 +9,14 @@
 GitHub のリポジトリ一覧で欲しいリポジトリにチェックを付けると、
 Windows の指定フォルダへすぐに `git clone` する Chrome 拡張です。
 
+*A Chrome extension that clones the GitHub repositories you check straight into a folder on Windows.*
+
 [![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](#)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)](#)
 [![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go&logoColor=white)](#)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[セットアップ](docs/setup.md) · [開発](docs/development.md) · [Chrome Web Store 公開](store/README.md)
+[セットアップ](docs/setup.md) · [開発](docs/development.md) · [リリース](https://github.com/tonbiattack/github-bulk-cloner/releases) · [Chrome Web Store 公開](store/README.md)
 
 </div>
 
