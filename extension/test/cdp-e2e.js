@@ -23,11 +23,6 @@ if (!EXTENSION_ID) {
 
 const GITHUB_URL = 'https://github.com/tonbiattack?tab=repositories';
 
-async function listTargets() {
-  const response = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`);
-  return response.json();
-}
-
 function connect(wsUrl) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(wsUrl);

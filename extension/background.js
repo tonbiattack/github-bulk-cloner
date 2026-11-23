@@ -2,14 +2,16 @@
  * Service worker: owns the Native Messaging connection to the Go host and
  * relays progress to the popup.
  *
- * The popup can close at any time, so the clone run is owned here and its state
- * is kept in memory plus chrome.storage.session. The popup re-subscribes on
- * open and receives the current snapshot.
+ * The popup can close at any time, so the clone run is owned here. MV3 workers
+ * are also terminated when idle, so the last finished run is mirrored into
+ * chrome.storage.session and restored on the next start; the popup then still
+ * shows the previous results.
  */
 
 const HOST_NAME = 'com.tonbiattack.github_bulk_cloner';
 const DEFAULT_ROOT = 'C:\\apps';
 const MAX_REPOSITORIES = 200;
+const RUN_STATE_KEY = 'lastRun';
 
 /** In-memory state for the active run. */
 let runState = {
@@ -24,6 +26,47 @@ let runState = {
 
 /** The live port, if a run is in progress. */
 let port = null;
+
+/** Set once the persisted state has been read, so it cannot clobber a new run. */
+let restored = false;
+
+/**
+ * Restores the last finished run. A run that was still marked running when the
+ * worker died is reported as interrupted rather than left hanging.
+ */
+async function restoreRunState() {
+  if (restored) return;
+  restored = true;
+
+  try {
+    const stored = await chrome.storage.session.get(RUN_STATE_KEY);
+    const saved = stored[RUN_STATE_KEY];
+    if (!saved || typeof saved !== 'object') return;
+    // Never overwrite a run that started before the restore finished.
+    if (runState.status === 'running') return;
+
+    if (saved.status === 'running') {
+      runState = {
+        ...saved,
+        status: 'error',
+        error: '実行中に拡張のバックグラウンドが停止しました。結果を確認して再実行してください。'
+      };
+    } else {
+      runState = saved;
+    }
+  } catch {
+    // storage.session may be unavailable; in-memory state still works.
+  }
+}
+
+/** Mirrors the current state so it survives a worker restart. */
+async function persistRunState() {
+  try {
+    await chrome.storage.session.set({ [RUN_STATE_KEY]: runState });
+  } catch {
+    // Persistence is best-effort.
+  }
+}
 
 // ------------------------------------------------------------------ storage
 
@@ -86,6 +129,7 @@ function finishRun(status, error) {
   runState.status = status;
   if (error) runState.error = error;
   disconnectPort();
+  persistRunState();
   broadcast();
 }
 
@@ -152,6 +196,7 @@ async function startClone(repositories) {
 
   const { root } = await getSettings();
   resetRun(specs.length);
+  await persistRunState();
   broadcast();
 
   let connected;
@@ -308,8 +353,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
 
     case 'gbc:getRunState':
-      sendResponse(snapshot());
-      return false;
+      restoreRunState()
+        .then(() => sendResponse(snapshot()))
+        .catch(() => sendResponse(snapshot()));
+      return true;
 
     case 'gbc:checkHost':
       checkHost().then(sendResponse);
