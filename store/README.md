@@ -53,8 +53,8 @@ node tools/capture-store-assets.js <32文字> $cloneRoot
 - [x] 権限の利用目的を説明できる
 - [x] ネイティブホストが別途必要な旨を説明に書いた
 - [x] スクリーンショットに個人パスが写っていない
-- [ ] `installer/store-extension-id.txt` に公開後の拡張 ID を記載した
-- [ ] ストアダッシュボードで申請した
+- [x] `installer/store-extension-id.txt` に公開後の拡張 ID を記載した（`gnahjocpcgihifhdgoabhednldpcdpgg`）
+- [x] ストアダッシュボードで申請した（v0.1.0、2026-11-23 審査中）
 
 ## 権限の正当性
 
@@ -100,7 +100,7 @@ https://tonbiattack.github.io/github-bulk-cloner/privacy-policy.html
 
 ### ストア公開後に必要な作業
 
-`installer/store-extension-id.txt` に、公開された拡張 ID を 1 行で記載してください。`setup.ps1` はこのファイルを読んで `allowed_origins` に設定します。空のままだと「拡張 ID が分かりません」と表示して停止します。
+`installer/store-extension-id.txt` に拡張 ID を記載済みです（`gnahjocpcgihifhdgoabhednldpcdpgg`）。`setup.ps1` はこのファイルを読んで `allowed_origins` に設定するため、利用者は ID を転記する必要がありません。空のままだと「拡張 ID が分かりません」と表示して停止します。
 
 ## 審査で聞かれやすい点
 

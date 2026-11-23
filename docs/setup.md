@@ -63,6 +63,16 @@ cd github-bulk-cloner
 .\installer\setup.ps1 -Dev -ExtensionId <32文字の拡張ID>
 ```
 
+`-ExtensionId` を渡すと、`installer/store-extension-id.txt` のストア版 ID より優先されます。
+
+> `allowed_origins` は 1 つの ID しか持てません。ストア版と開発版を切り替えるときは、そのつど `setup.ps1` を実行し直してください。切り替え後に Chrome で拡張を再読み込みすると、ポップアップのバッジが「接続 OK」に戻ります。
+
+ストア版を使う場合は、引数なしで実行すれば記載済みの ID が使われます。
+
+```powershell
+.\installer\setup.ps1
+```
+
 ### オフライン / 手動でバイナリを置く場合
 
 Releases から `github-bulk-cloner-host-windows-amd64.exe` をダウンロードしておき、パスを指定します。

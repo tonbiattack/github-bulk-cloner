@@ -57,7 +57,7 @@ Go は不要です。ネイティブホストは [GitHub Releases](https://githu
 
 一般利用者は 3 ステップです。Go のインストールは不要です。
 
-**1. 拡張を入れる** — Chrome Web Store から追加します（開発版は `chrome://extensions` で `extension` フォルダを読み込みます）。
+**1. 拡張を入れる** — Chrome Web Store から追加します（開発版は `chrome://extensions` で `extension` フォルダを読み込みます）。ストア版の拡張 ID は `gnahjocpcgihifhdgoabhednldpcdpgg` で、`setup.ps1` に登録済みです。
 
 **2. リポジトリを取得する** — `setup.ps1` はリポジトリ内のスクリプトです。
 

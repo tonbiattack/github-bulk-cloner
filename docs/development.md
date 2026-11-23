@@ -370,6 +370,19 @@ Get-FileHash .\github-bulk-cloner-host-windows-amd64.exe -Algorithm SHA256
 
 公開後は `installer/store-extension-id.txt` に拡張 ID を記載します。`installer/setup.ps1` がこのファイルを読んで `allowed_origins` に設定します。
 
+現在のストア版拡張 ID:
+
+```text
+gnahjocpcgihifhdgoabhednldpcdpgg
+```
+
+ID を確認するには、`chrome://extensions` でストア版の「ID」を見るか、次のコマンドでマニフェストを確認します。
+
+```powershell
+# setup.ps1 が読み取る ID
+Get-Content .\installer\store-extension-id.txt | Where-Object { $_ -and -not $_.StartsWith('#') }
+```
+
 ## 制約
 
 - 同時実行は 1 リクエスト。リポジトリは順番に処理する。

@@ -56,6 +56,12 @@ jobs:
           go vet ./...
           go test ./... -short
 
+      # The store installer reads this file, so a missing or malformed ID
+      # would break setup for store users.
+      - name: Check the store extension ID
+        shell: pwsh
+        run: .\installer\test-store-id.ps1
+
       - name: Build the native host
         shell: pwsh
         run: |

@@ -1,5 +1,8 @@
 # Chrome Web Store の拡張 ID
 #
-# ストアで公開したら、この行を実際の ID（32文字の a-p）に書き換えてください。
-# 空のままだと setup.ps1 は「ID が分かりません」と表示して停止します。
+# このファイルの最初の「# で始まらない行」が ID として読み込まれます。
+# setup.ps1 はこの ID を allowed_origins に設定します。
 # 開発版（パッケージ化されていない拡張）は setup.ps1 -Dev -ExtensionId <ID> を使います。
+#
+# ストア: GitHub Bulk Cloner v0.1.0（2026-11-23 審査提出）
+gnahjocpcgihifhdgoabhednldpcdpgg
