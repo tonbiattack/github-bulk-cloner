@@ -32,7 +32,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: native-host/go.sum
+          # The module has no external dependencies, so there is no go.sum to
+          # cache against.
+          cache: false
 
       # Derive the version from the tag, or from the manual input.
       - name: Resolve version
@@ -151,7 +153,11 @@ jobs:
         shell: pwsh
         run: .\tools\package-extension.ps1
 
+      # Publishing needs a tag to attach the assets to. A manual run from a
+      # branch is a dry run: it builds and tests everything but does not touch
+      # an existing release.
       - name: Create the release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           name: v${{ steps.version.outputs.version }}
@@ -163,3 +169,10 @@ jobs:
             native-host/dist/host/github-bulk-cloner-host.exe
             native-host/dist/host/SHA256SUMS.txt
             dist/github-bulk-cloner-${{ steps.version.outputs.version }}.zip
+
+      - name: Report a dry run
+        if: github.ref_type != 'tag'
+        shell: pwsh
+        run: |
+          Write-Host 'タグ以外からの手動実行のため、リリースは作成していません。'
+          Write-Host 'ビルドとテストのみを行いました。公開するには v* タグを push してください。'
