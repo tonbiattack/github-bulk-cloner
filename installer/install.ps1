@@ -158,7 +158,7 @@ if ($usePrebuilt) {
 
   Stop-RunningHost
 
-  $version = '0.1.0'
+  $version = '0.1.1'
   Push-Location $NativeHostDir
   try {
     & go build -trimpath -ldflags "-s -w -X main.version=$version" -o $exePath ./cmd/host
