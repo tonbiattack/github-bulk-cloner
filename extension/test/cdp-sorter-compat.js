@@ -99,7 +99,21 @@ const SNAPSHOT = `(() => {
       .filter((row) => row.querySelector('.gbc-checkbox')).length,
     toolbar: document.getElementById('gbc-toolbar')?.textContent ?? null,
     sorterStatus: document.querySelector('[data-grs-status]')?.textContent ?? '',
-    sorterError: document.querySelector('[data-grs-status]')?.classList.contains('grs-status--error') ?? false
+    sorterError: document.querySelector('[data-grs-status]')?.classList.contains('grs-status--error') ?? false,
+    firstRowPlacement: (() => {
+      const row = document.querySelector('[data-grs-list] .grs-repo') ||
+        document.querySelector('#user-repositories-list li[itemprop="owns"]');
+      if (!row) return null;
+      const box = row.querySelector('.gbc-checkbox');
+      const name = row.querySelector('.grs-repo__name, h3 a');
+      if (!box || !name) return null;
+      const boxRect = box.getBoundingClientRect();
+      const nameRect = name.getBoundingClientRect();
+      return {
+        gap: Math.round(nameRect.left - boxRect.right),
+        insideHeading: Boolean(box.closest('h3'))
+      };
+    })()
   };
 })()`;
 
@@ -145,6 +159,12 @@ async function main() {
     `${state.rowsWithBoxes} rows with a checkbox`);
   const toolbarCount = Number((/\/\s*(\d+)\s*件選択/.exec(String(state.toolbar)) || [])[1]);
   check('toolbar counts the visible candidates', toolbarCount === state.boxes, String(state.toolbar));
+  check('checkbox sits next to the repository name',
+    Boolean(state.firstRowPlacement) &&
+      state.firstRowPlacement.gap >= 0 &&
+      state.firstRowPlacement.gap <= 40 &&
+      state.firstRowPlacement.insideHeading,
+    JSON.stringify(state.firstRowPlacement));
 
   // Checking a box must work: it marks the row and requests a clone.
   await evaluate(tab, `document.querySelector('[data-grs-list] .gbc-checkbox').click()`);

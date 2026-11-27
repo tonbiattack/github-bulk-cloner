@@ -191,10 +191,25 @@
   }
 
   /** Inserts the checkbox at the start of the row that contains the anchor. */
+  /**
+   * Inserts the checkbox next to the repository name.
+   *
+   * GitHub's rows are flex containers (`d-flex justify-content-between`) whose
+   * main column is a fixed-width `col-10`; adding the checkbox as a flex
+   * sibling pushes that column to the far right and leaves a large gap. Putting
+   * it immediately before the name link keeps the checkbox and the title
+   * together and leaves the row layout untouched.
+   */
   function insertCheckbox(anchor, wrapper) {
-    const row = anchor.closest('li, [role="listitem"], article, div.Box-row');
+    const row = rowFor(anchor);
+    const parent = anchor.parentNode;
+
+    if (parent && parent.nodeType === 1 && parent !== row) {
+      parent.insertBefore(wrapper, anchor);
+      return row || parent;
+    }
     if (row) {
-      row.insertBefore(wrapper, row.firstChild);
+      row.insertBefore(wrapper, anchor);
       return row;
     }
     anchor.parentNode.insertBefore(wrapper, anchor);
