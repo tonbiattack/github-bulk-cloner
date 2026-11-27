@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GitHub Bulk Cloner",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "GitHub のリポジトリ一覧で欲しいものにチェックを付けるだけで、Windows の指定フォルダへその場で git clone します。保存先フォルダは自動作成、既存フォルダは変更しません。",
   "minimum_chrome_version": "102",
   "permissions": ["storage", "nativeMessaging", "tabs"],

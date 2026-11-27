@@ -54,7 +54,8 @@ node tools/capture-store-assets.js <32文字> $cloneRoot
 - [x] ネイティブホストが別途必要な旨を説明に書いた
 - [x] スクリーンショットに個人パスが写っていない
 - [x] `installer/store-extension-id.txt` に公開後の拡張 ID を記載した（`gnahjocpcgihifhdgoabhednldpcdpgg`）
-- [x] ストアダッシュボードで申請した（v0.1.0、2026-11-23 審査中）
+- [x] ストアダッシュボードで申請した（v0.1.0、2026-11-24 公開）
+- [ ] v0.1.1 を審査に提出する（2026-11-27 作成）
 
 ## 権限の正当性
 
