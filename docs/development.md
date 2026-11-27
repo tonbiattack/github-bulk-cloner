@@ -189,6 +189,29 @@ node extension/test/cdp-invalidate-e2e.js <32文字>
 
 このテストは修正前のコードに対して実行すると失敗する（例外が出て UI も残る）ため、回帰検出に使えます。
 
+GitHub Repo Sorter との併用は別スクリプトで確認します。両方の拡張を同じ Chrome に読み込んでから実行します。
+
+```powershell
+# 1. 並べ替え拡張と一緒に Chrome を起動する
+$profile = Join-Path $env:TEMP 'gbc-compat'
+$sorter = 'C:\apps\github-repo-sorter\dist'
+$cloner = (Resolve-Path extension).Path
+& 'C:\Program Files\Google\Chrome\Application\chrome.exe' `
+  "--user-data-dir=$profile" --remote-debugging-port=9337 `
+  "--disable-extensions-except=$sorter,$cloner" "--load-extension=$sorter,$cloner" about:blank
+
+# 2. 互換テストを実行する
+$env:CDP_PORT = '9337'
+node extension/test/cdp-sorter-compat.js
+```
+
+`cdp-sorter-compat.js` が確認する内容:
+
+- 並べ替え中は `#user-repositories-list` が非表示でも、見えている `[data-grs-list]` にチェックボックスが付く
+- 非表示の一覧にはチェックボックスが残らない（クリックできない場所に付けない）
+- 標準表示に切り替えるとネイティブ一覧側へ移り、独自ソートへ戻すと重複せず戻る
+- チェックで行が選択され、ページ送り後も 1 行 1 チェックボックスを保つ
+
 診断表示と衝突判定は別スクリプトで確認します。
 
 ```powershell

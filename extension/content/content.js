@@ -20,6 +20,10 @@
     '[data-testid="results-list"]',
     '#user-repositories-list',
     '#org-repositories-list',
+    // GitHub Repo Sorter replaces GitHub's list with its own while keeping the
+    // native one in the DOM but hidden, so this container must be considered
+    // too (see the visibility checks in candidateAnchors).
+    '[data-grs-list]',
     'div[data-testid="topic-repositories"]',
     'ul.repo-list',
     'div.repo-list',
@@ -95,21 +99,36 @@
 
   // ---------------------------------------------------------------- scanning
 
-  /** Returns the anchors to consider, preferring known listing containers. */
+  /**
+   * Reports whether an element is currently rendered.
+   *
+   * GitHub (and extensions such as GitHub Repo Sorter) hide lists with
+   * `display: none` instead of removing them. Checkboxes added to a hidden row
+   * can never be clicked, so hidden candidates must be skipped and the next
+   * visible container used instead.
+   */
+  function isVisible(element) {
+    if (!element || !element.isConnected) return false;
+    if (typeof element.getClientRects !== 'function') return false;
+    return element.getClientRects().length > 0;
+  }
+
+  /** Returns the anchors to consider, preferring known visible listing containers. */
   function candidateAnchors() {
     for (const selector of LIST_CONTAINERS) {
-      const containers = document.querySelectorAll(selector);
-      if (containers.length === 0) continue;
-
       const anchors = [];
-      for (const container of containers) {
-        anchors.push(...container.querySelectorAll('a[href]'));
+      for (const container of document.querySelectorAll(selector)) {
+        if (!isVisible(container)) continue;
+        for (const anchor of container.querySelectorAll('a[href]')) {
+          if (isVisible(anchor)) anchors.push(anchor);
+        }
       }
       if (anchors.length > 0) return anchors;
     }
 
     const fallback = document.querySelector(FALLBACK_CONTAINER);
-    return fallback ? Array.from(fallback.querySelectorAll('a[href]')) : [];
+    if (!fallback || !isVisible(fallback)) return [];
+    return Array.from(fallback.querySelectorAll('a[href]')).filter(isVisible);
   }
 
   /** Returns the row element that represents one repository entry. */
@@ -316,7 +335,13 @@
       seenThisScan.add(key);
 
       const existing = entries.get(key);
-      if (existing && existing.checkbox.isConnected) return;
+      if (existing) {
+        // Keep a live, visible checkbox; replace one that is hidden or gone
+        // (for example when GitHub Repo Sorter swaps the list it renders).
+        if (existing.checkbox.isConnected && isVisible(existing.checkbox)) return;
+        existing.wrapper.remove();
+        entries.delete(key);
+      }
 
       const { wrapper, checkbox } = createCheckbox(candidate);
       const insertedRow = insertCheckbox(anchor, wrapper);
@@ -338,9 +363,12 @@
       register(anchor, null);
     }
 
-    // Drop entries whose checkbox GitHub removed and that no longer appear.
+    // Drop entries whose checkbox is gone or no longer visible and that did
+    // not reappear in this scan.
     for (const [key, entry] of entries) {
-      if (!entry.checkbox.isConnected && !seenThisScan.has(key)) {
+      if (seenThisScan.has(key)) continue;
+      if (!entry.checkbox.isConnected || !isVisible(entry.checkbox)) {
+        entry.wrapper.remove();
         entries.delete(key);
       }
     }
